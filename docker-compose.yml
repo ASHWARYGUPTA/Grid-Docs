@@ -1,0 +1,60 @@
+# Local development stack — NOT production configuration
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: grid
+      POSTGRES_PASSWORD: grid
+      POSTGRES_DB: grid_unlocked
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grid -d grid_unlocked"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      GRID_DATABASE_URL: postgresql+asyncpg://grid:grid@postgres:5432/grid_unlocked
+      GRID_REDIS_URL: redis://redis:6379/0
+      GRID_ASTRAM_CSV_PATH: /app/data/astram_events.csv
+    volumes:
+      # Hot reload for local dev — remove in prod
+      - ./backend/src:/app/backend/src:ro
+      - ./data:/app/data:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      uv run uvicorn grid_unlocked.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app/backend/src
+
+volumes:
+  pgdata:
+  redisdata:

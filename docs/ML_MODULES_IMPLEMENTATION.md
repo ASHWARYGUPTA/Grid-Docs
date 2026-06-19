@@ -1551,6 +1551,12 @@ A: No. GCDH only until Phase 3 telemetry SLO gate passes.
 **Q: What is the 94% gate measuring?**  
 A: Accuracy on a governance-approved operational validation slice (stratified, representative). It complements PR-AUC, not replaces it.
 
+**Q: How does M17 citizen reporting use M03?**  
+A: M17 builds a provisional `FeatureVector` from GPS-snapped corridor/junction + keyword `cause_hint`, then calls M03 for `ict_p50`/`ict_p80` and `p_closure` before the report is commander-verified. Low `cause_confidence` widens ICT bands. Verified reports with commander-adjusted cause feed M13; unverified reports are excluded from training.
+
+**Q: Can we train photo cause classification from ASTraM CSV?**  
+A: No. `map_file` is 100% null. MVP uses keyword `cause_hint`; vision models require a new labeled citizen corpus post-launch.
+
 ---
 
 ## Appendix P — Version History

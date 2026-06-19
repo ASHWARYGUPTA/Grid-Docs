@@ -1,0 +1,6 @@
+grid_unlocked.db
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/

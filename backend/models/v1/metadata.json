@@ -1,0 +1,8 @@
+{
+  "closure_version": "lgbm-v1",
+  "ict_version": "cox-ph-v1",
+  "source": "ml",
+  "trained_at": "2026-06-19T07:07:08.981540Z",
+  "training_rows": 8170,
+  "closure_positive_rate": 0.0827
+}

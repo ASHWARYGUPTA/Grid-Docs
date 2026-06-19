@@ -1,0 +1,20 @@
+{
+  "corridor_cause_closure_rate": 790,
+  "reporting_bias_weight": 665,
+  "dow_sin": 589,
+  "hour_sin": 588,
+  "hour_cos": 533,
+  "dow_cos": 456,
+  "duration_prior_h": 371,
+  "veh_complexity_score": 338,
+  "corridor_enc": 337,
+  "betweenness_norm": 268,
+  "cause_enc": 189,
+  "cause_median_resolution_global_h": 136,
+  "is_planned": 125,
+  "is_peak_hour": 67,
+  "degree_norm": 32,
+  "is_weekend": 10,
+  "is_named_corridor": 0,
+  "simultaneous_events_2km": 0
+}

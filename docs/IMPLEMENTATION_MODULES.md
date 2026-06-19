@@ -1,11 +1,11 @@
 # Grid Unlocked — Implementation Modules Document
 
 **Author:** Ashwary Gupta (Roll No: 23115017)  
-**Version:** 1.0 (Implementation Context Edition)  
+**Version:** 1.1 (Citizen Reporting Edition)  
 **Date:** June 2026  
 **System:** Grid Unlocked — Intelligent Event-Driven Traffic Management  
 **Parent Context:** ASTraM (Actionable Intelligence for Sustainable Traffic Management), Bengaluru Traffic Police  
-**Primary Reference:** PRD v3.0 (`PRD_Event_Driven_Traffic.md`)  
+**Primary Reference:** PRD v3.1 (`PRD_Event_Driven_Traffic.md`)  
 **Research Reference:** `TRAFFIC_ANALYSIS_IDEA_PLAN.md` Sections 3–9  
 
 ---
@@ -14,7 +14,7 @@
 
 ### 0.1 Purpose
 
-This document translates PRD v3.0 and the ASTraM research corpus into **buildable module contracts**. Each of the 16 modules has explicit responsibility boundaries, public interfaces (endpoints and events only — no file paths), latency budgets, degradation behavior, and test ownership. Engineers, hackathon judges, and TMC operators can use this as the authoritative implementation map without reading the full research plan.
+This document translates PRD v3.1 and the ASTraM research corpus into **buildable module contracts**. Each of the 18 modules has explicit responsibility boundaries, public interfaces (endpoints and events only — no file paths), latency budgets, degradation behavior, and test ownership. Engineers, hackathon judges, and TMC operators can use this as the authoritative implementation map without reading the full research plan.
 
 ### 0.2 Audience
 
@@ -22,14 +22,16 @@ Hackathon builders (§7, M01–M09/M13–M16); backend/ML (§5–§6); TMC ops (
 
 ### 0.3 Corpus Grounding
 
-| Source | Records / Facts Used |
-|--------|----------------------|
-| ASTraM anonymized export | 8,173 incidents; 17 cause classes; 22 corridors; 54 police stations |
-| Closure base rate | 8.3% (`requires_road_closure`) |
-| Planned closure rate | 36.2% planned vs 6.6% unplanned (5.5× ratio) |
-| ICT censoring | 61.6% of records lack `closed_datetime` — survival models mandatory |
-| Priority signal | 99–100% High on named corridors; 0% High on Non-corridor — structural, not severity |
-| Reporting bias | 14:00–17:59 IST trough (384 events) vs true evening congestion peak 17:00–21:00 |
+
+| Source                   | Records / Facts Used                                                                |
+| ------------------------ | ----------------------------------------------------------------------------------- |
+| ASTraM anonymized export | 8,173 incidents; 17 cause classes; 22 corridors; 54 police stations                 |
+| Closure base rate        | 8.3% (`requires_road_closure`)                                                      |
+| Planned closure rate     | 36.2% planned vs 6.6% unplanned (5.5× ratio)                                        |
+| ICT censoring            | 61.6% of records lack `closed_datetime` — survival models mandatory                 |
+| Priority signal          | 99–100% High on named corridors; 0% High on Non-corridor — structural, not severity |
+| Reporting bias           | 14:00–17:59 IST trough (384 events) vs true evening congestion peak 17:00–21:00     |
+
 
 ### 0.4 Document Conventions
 
@@ -42,9 +44,12 @@ Hackathon builders (§7, M01–M09/M13–M16); backend/ML (§5–§6); TMC ops (
 
 ### 0.5 Version History
 
-| Version | Date | Change |
-|---------|------|--------|
-| 1.0 | June 2026 | Initial Implementation Context Edition — 16 modules, PRD v3.0 alignment |
+
+| Version | Date      | Change                                                                               |
+| ------- | --------- | ------------------------------------------------------------------------------------ |
+| 1.0     | June 2026 | Initial Implementation Context Edition — 16 modules, PRD v3.0 alignment              |
+| 1.1     | June 2026 | M17 CitizenReportService + M18 CitizenApp; PRD v3.1 citizen reporting and pre-alerts |
+
 
 ---
 
@@ -52,43 +57,49 @@ Hackathon builders (§7, M01–M09/M13–M16); backend/ML (§5–§6); TMC ops (
 
 ### 1.1 Positioning Relative to ASTraM
 
-Grid Unlocked is an **additive intelligence plane** around ASTraM. ASTraM remains the system-of-record for incidents, field reporting (BOT), and citizen-facing congestion alerts. Grid Unlocked adds:
+Grid Unlocked is an **additive intelligence plane** around ASTraM. ASTraM remains the system-of-record for incidents, field reporting (BOT), and legacy citizen-facing congestion alerts. Grid Unlocked adds:
 
 1. **Predictive scoring** — closure probability, ICT quantiles, corridor impact (RCI).
 2. **Prescriptive optimization** — non-blocking MILP dispatch with deterministic greedy fallback.
 3. **Explainable propagation** — Graph-Centrality Decay Heuristic (GCDH), not STGCN in Phase 1/2.
 4. **Human-supervised actuation** — agentic station dispatch and VMS routing only after commander approval.
 5. **Governed learning** — 80/20 replay buffer, 94% accuracy gate, shadow mode before promotion.
+6. **Citizen reporting and pre-alerts (v3.1)** — photo + GPS congestion reports with immediate ICT quotes; corridor subscription pre-notifications via M17/M18.
 
 No ASTraM schema replacement is introduced in v3.0. All writes back to operational systems go through explicit integration adapters with audit logs.
 
 ### 1.2 Build Philosophy (SOLID / KISS / YAGNI)
 
-| Principle | Implementation Rule |
-|-----------|---------------------|
-| **SOLID** | One module = one reason to change. Propagation is model-agnostic behind `PropagationEngine` interface. MILP and greedy are separate strategies behind `DispatchOrchestrator`. |
-| **KISS** | LightGBM + Cox PH for impact; GCDH for ripple maps; OR-Tools MILP with hard cutoff. No STGCN until telemetry SLO exists. |
-| **YAGNI** | No city-wide signal control, no citizen app, no cross-city generalization in v3.0. |
-| **Contract-first** | Every cross-module call has a latency budget and a Tier 1/2/3 degradation path. |
-| **Non-blocking dispatch** | Recommendation API never waits beyond 1.8 s P95; MILP killed at 1.5 s. |
-| **Shadow before actuation** | Recommendations run parallel to live ops until governance promotion. |
+
+| Principle                   | Implementation Rule                                                                                                                                                           |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **SOLID**                   | One module = one reason to change. Propagation is model-agnostic behind `PropagationEngine` interface. MILP and greedy are separate strategies behind `DispatchOrchestrator`. |
+| **KISS**                    | LightGBM + Cox PH for impact; GCDH for ripple maps; OR-Tools MILP with hard cutoff. No STGCN until telemetry SLO exists.                                                      |
+| **YAGNI**                   | No city-wide signal control, no ASTraM fines/violations replacement, no cross-city generalization in v3.1. Citizen app is **in scope** as report + pre-alert only.            |
+| **Contract-first**          | Every cross-module call has a latency budget and a Tier 1/2/3 degradation path.                                                                                               |
+| **Non-blocking dispatch**   | Recommendation API never waits beyond 1.8 s P95; MILP killed at 1.5 s.                                                                                                        |
+| **Shadow before actuation** | Recommendations run parallel to live ops until governance promotion.                                                                                                          |
+
 
 ### 1.3 End-to-End Value Chain
 
 ```
-Sense (ASTraM + portal + field) → Enrich (features + graph) → Score (impact + propagation)
-→ Optimize (dispatch + diversion) → Present (dashboard + field app) → Approve (human)
+Sense (ASTraM + portal + field + citizen) → Enrich (features + graph) → Score (impact + propagation)
+→ Optimize (dispatch + diversion) → Present (dashboard + field + citizen app) → Approve (human)
 → Act (agentic APIs + VMS) [Phase 1.5+] → Learn (replay buffer + retrain)
 ```
 
 ### 1.4 Operational Personas
 
-| Persona | Primary Modules | Success Criteria |
-|---------|-----------------|------------------|
-| Traffic Commander | M09, M14, M15 | Action cards within SLA; provenance visible; tier status clear |
-| Field Officer / Dispatcher | M16, M07, M08 | Assignment packet <5 s; fallback never empty |
-| Event Coordinator | M06, M08, M12 | 72-hour impact package; diversion scenarios |
-| Platform Admin / Analyst | M13, M14 | Shadow metrics; 80/20 buffer reports; cascade drill results |
+
+| Persona                    | Primary Modules | Success Criteria                                               |
+| -------------------------- | --------------- | -------------------------------------------------------------- |
+| Traffic Commander          | M09, M14, M15   | Action cards within SLA; provenance visible; tier status clear |
+| Field Officer / Dispatcher | M16, M07, M08   | Assignment packet <5 s; fallback never empty                   |
+| Event Coordinator          | M06, M08, M12   | 72-hour impact package; diversion scenarios                    |
+| Citizen / Commuter         | M17, M18        | Report ACK ≤2 s; ICT bands visible; pre-alert delivery         |
+| Platform Admin / Analyst   | M13, M14        | Shadow metrics; 80/20 buffer reports; cascade drill results    |
+
 
 ### 1.5 Technology Posture
 
@@ -100,57 +111,68 @@ Modules communicate via REST (sync), WebSocket (dashboard), and event bus (async
 
 ### 2.1 Module Registry
 
-| ID | Module | Layer | Phase | Upstream Dependencies | Downstream Consumers | SLA (P95) |
-|----|--------|-------|-------|----------------------|---------------------|-----------|
-| M01 | IngestionGateway | Ingestion | MVP | ASTraM API, Planned Event Portal, Field Reports | M02, M05, M13 | Ingest ACK ≤350 ms |
-| M02 | FeatureGraphService | Features | MVP | M01, OSM graph (static) | M03, M04, M05, M07 | Feature read ≤50 ms |
-| M03 | ImpactEngine | ML / Scoring | MVP | M02 | M04, M07, M09, M06 | Score ≤200 ms |
-| M04 | PropagationEngine | ML / Graph | MVP | M02, M03 | M07, M09, M15 | Propagation ≤150 ms |
-| M05 | HotspotService | Analytics | MVP | M01, M02 | M09, M15 | Hotspot query ≤100 ms |
-| M06 | PlannedEventTemplateEngine | Planning | MVP | M01, M03, M08 | M09, M15 | Package ≤10 s |
-| M07 | DispatchOrchestrator | Optimization | MVP | M02, M03, M04 | M09, M10, M16 | Decision ≤1.8 s; MILP cutoff 1.5 s |
-| M08 | DiversionRoutingEngine | Routing | MVP | M02 (graph), M03 | M06, M09, M11 | Atlas lookup ≤80 ms |
-| M09 | RecommendationAPI | API / Facade | MVP | M03–M08, M14 | M15, M16, M10 | Action card ≤350 ms ingest path |
-| M10 | AgenticExecutionBroker | Actuation | 1.5 | M09 (post-approval) | Station APIs, audit | Handoff ≤200 ms |
-| M11 | VMSRouter | Actuation | 1.5 | M09, M08 | LED/VMS webhooks | Fanout ≤500 ms |
-| M12 | TransitImpactService | Advisory | 2 | M03, BMTC GTFS-RT | M09, M15 | Index compute ≤2 s |
-| M13 | ReplayLearningService | ML Ops | MVP | M01 outcomes, M14 gates | M03, M14 | Weekly batch; gate eval <30 min |
-| M14 | GovernanceConsole | Platform | MVP | All modules (health) | M09, M13, M15 | Tier eval ≤1 s |
-| M15 | CommandDashboard | UI | MVP | M09, M14, M05 | Commanders | Live delta ≤5 s |
-| M16 | FieldOfficerApp | UI | MVP | M09, M07, M14 | Field officers | Packet render ≤3 s |
+
+| ID  | Module                     | Layer           | Phase | Upstream Dependencies                           | Downstream Consumers | SLA (P95)                             |
+| --- | -------------------------- | --------------- | ----- | ----------------------------------------------- | -------------------- | ------------------------------------- |
+| M01 | IngestionGateway           | Ingestion       | MVP   | ASTraM API, Planned Event Portal, Field Reports | M02, M05, M13        | Ingest ACK ≤350 ms                    |
+| M02 | FeatureGraphService        | Features        | MVP   | M01, OSM graph (static)                         | M03, M04, M05, M07   | Feature read ≤50 ms                   |
+| M03 | ImpactEngine               | ML / Scoring    | MVP   | M02                                             | M04, M07, M09, M06   | Score ≤200 ms                         |
+| M04 | PropagationEngine          | ML / Graph      | MVP   | M02, M03                                        | M07, M09, M15        | Propagation ≤150 ms                   |
+| M05 | HotspotService             | Analytics       | MVP   | M01, M02                                        | M09, M15             | Hotspot query ≤100 ms                 |
+| M06 | PlannedEventTemplateEngine | Planning        | MVP   | M01, M03, M08                                   | M09, M15             | Package ≤10 s                         |
+| M07 | DispatchOrchestrator       | Optimization    | MVP   | M02, M03, M04                                   | M09, M10, M16        | Decision ≤1.8 s; MILP cutoff 1.5 s    |
+| M08 | DiversionRoutingEngine     | Routing         | MVP   | M02 (graph), M03                                | M06, M09, M11        | Atlas lookup ≤80 ms                   |
+| M09 | RecommendationAPI          | API / Facade    | MVP   | M03–M08, M14                                    | M15, M16, M10        | Action card ≤350 ms ingest path       |
+| M10 | AgenticExecutionBroker     | Actuation       | 1.5   | M09 (post-approval)                             | Station APIs, audit  | Handoff ≤200 ms                       |
+| M11 | VMSRouter                  | Actuation       | 1.5   | M09, M08                                        | LED/VMS webhooks     | Fanout ≤500 ms                        |
+| M12 | TransitImpactService       | Advisory        | 2     | M03, BMTC GTFS-RT                               | M09, M15             | Index compute ≤2 s                    |
+| M13 | ReplayLearningService      | ML Ops          | MVP   | M01 outcomes, M14 gates                         | M03, M14             | Weekly batch; gate eval <30 min       |
+| M14 | GovernanceConsole          | Platform        | MVP   | All modules (health)                            | M09, M13, M15        | Tier eval ≤1 s                        |
+| M15 | CommandDashboard           | UI              | MVP   | M09, M14, M05                                   | Commanders           | Live delta ≤5 s                       |
+| M16 | FieldOfficerApp            | UI              | MVP   | M09, M07, M14                                   | Field officers       | Packet render ≤3 s                    |
+| M17 | CitizenReportService       | Ingestion / API | MVP   | M02, M03, M01                                   | M18, M09, M15        | Report ACK + ICT quote ≤2 s           |
+| M18 | CitizenApp                 | UI              | MVP   | M17, M05, M04                                   | Commuters            | Report submit ≤3 s; alert render ≤2 s |
+
 
 ### 2.2 Interface Map (Producer → Consumer)
 
-| Producer | Event / Endpoint Contract | Consumer | Payload Highlights |
-|----------|---------------------------|----------|-------------------|
-| M01 | `EventNormalized` | M02, M05, M13 | `event_id`, `cause`, `corridor`, `lat/lon`, `is_planned`, timestamps |
-| M01 | `GET /events/{id}` | M09, M15 | Full normalized event record |
-| M02 | `GET /features/{event_id}` | M03, M04, M07 | RCI components, centrality, temporal vector, corridor×cause priors |
-| M02 | `GET /graph/centrality/{node_id}` | M04, M07, M08 | Betweenness, edge weights |
-| M03 | `POST /impact/score` | M04, M07, M09, M06 | `p_closure`, `ict_p20/p50/p80`, `rci`, `severity_band` |
-| M04 | `POST /propagation/ripple` | M07, M09, M15 | Per-node `risk_t`, hop distance, marginal cutoff |
-| M05 | `GET /hotspots?horizon=` | M09, M15 | Observed + predicted clusters, H3 cells |
-| M06 | `POST /planned/package` | M09, M15 | 72h checklist, staffing, barricades, diversion refs |
-| M07 | `POST /dispatch/recommend` | M09, M16 | Assignments, `source: MILP\|GREEDY_FALLBACK`, latency_ms |
-| M08 | `GET /diversions/atlas/{junction_id}` | M06, M09, M11 | Top-k paths, cyclic gridlock flags |
-| M09 | `GET /recommendations/{event_id}` | M15, M16, M10 | Unified action card + evidence + provenance |
-| M09 | `POST /recommendations/{id}/approve` | M10, M11 | Approval token, commander_id, override codes |
-| M10 | `POST /execute/dispatch` | Station APIs | Unit dispatch, barricade reservation IDs |
-| M11 | `POST /vms/push` | VMS endpoints | Route text, board_id, retry policy |
-| M12 | `GET /transit/impact/{event_id}` | M09, M15 | Passenger delay index, overloaded routes |
-| M13 | `POST /learning/retrain` | M03 (model registry) | Buffer manifest, accuracy metrics, promotion decision |
-| M14 | `GET /governance/tier` | All modules | `tier: 1\|2\|3`, feature flags, shadow_mode |
-| M14 | `POST /governance/override-tier` | M15 | Manual tier transition with audit |
-| M15 | WebSocket `dashboard.delta` | Browser clients | Event cards, map layers, tier badge |
-| M16 | `GET /field/packet/{assignment_id}` | Mobile clients | Route, hazards, ICT quantiles, navigation deep link |
+
+| Producer | Event / Endpoint Contract             | Consumer             | Payload Highlights                                                   |
+| -------- | ------------------------------------- | -------------------- | -------------------------------------------------------------------- |
+| M01      | `EventNormalized`                     | M02, M05, M13        | `event_id`, `cause`, `corridor`, `lat/lon`, `is_planned`, timestamps |
+| M01      | `GET /events/{id}`                    | M09, M15             | Full normalized event record                                         |
+| M02      | `GET /features/{event_id}`            | M03, M04, M07        | RCI components, centrality, temporal vector, corridor×cause priors   |
+| M02      | `GET /graph/centrality/{node_id}`     | M04, M07, M08        | Betweenness, edge weights                                            |
+| M03      | `POST /impact/score`                  | M04, M07, M09, M06   | `p_closure`, `ict_p20/p50/p80`, `rci`, `severity_band`               |
+| M04      | `POST /propagation/ripple`            | M07, M09, M15        | Per-node `risk_t`, hop distance, marginal cutoff                     |
+| M05      | `GET /hotspots?horizon=`              | M09, M15             | Observed + predicted clusters, H3 cells                              |
+| M06      | `POST /planned/package`               | M09, M15             | 72h checklist, staffing, barricades, diversion refs                  |
+| M07      | `POST /dispatch/recommend`            | M09, M16             | Assignments, `source: MILP|GREEDY_FALLBACK`, latency_ms              |
+| M08      | `GET /diversions/atlas/{junction_id}` | M06, M09, M11        | Top-k paths, cyclic gridlock flags                                   |
+| M09      | `GET /recommendations/{event_id}`     | M15, M16, M10        | Unified action card + evidence + provenance                          |
+| M09      | `POST /recommendations/{id}/approve`  | M10, M11             | Approval token, commander_id, override codes                         |
+| M10      | `POST /execute/dispatch`              | Station APIs         | Unit dispatch, barricade reservation IDs                             |
+| M11      | `POST /vms/push`                      | VMS endpoints        | Route text, board_id, retry policy                                   |
+| M12      | `GET /transit/impact/{event_id}`      | M09, M15             | Passenger delay index, overloaded routes                             |
+| M13      | `POST /learning/retrain`              | M03 (model registry) | Buffer manifest, accuracy metrics, promotion decision                |
+| M14      | `GET /governance/tier`                | All modules          | `tier: 1|2|3`, feature flags, shadow_mode                            |
+| M14      | `POST /governance/override-tier`      | M15                  | Manual tier transition with audit                                    |
+| M15      | WebSocket `dashboard.delta`           | Browser clients      | Event cards, map layers, tier badge                                  |
+| M16      | `GET /field/packet/{assignment_id}`   | Mobile clients       | Route, hazards, ICT quantiles, navigation deep link                  |
+| M17      | `POST /citizen/report`                | M18, M01, M15        | photo_ref, lat/lon, cause_hint, ict_p50/p80, h3_cell, corridor       |
+| M17      | `POST /citizen/verify/{report_id}`    | M01, M09             | Commander auth → promotes to normalized event                        |
+| M17      | Event: `CitizenReportSubmitted`       | M15, M18             | report_id, location snap, ICT quote, authenticated=false             |
+| M18      | `POST /citizen/subscribe`             | M17                  | corridor or H3 cells for pre-alert fanout                            |
+| M18      | WebSocket `citizen.alert`             | Browser/mobile       | Hotspot/propagation pre-notification payload                         |
+
 
 ### 2.3 Data Entities (Summary)
 
-`NormalizedEvent` (M01), `FeatureVector` (M02), `ImpactScore` (M03), `PropagationMap` (M04), `HotspotCluster` (M05), `PlannedEventPackage` (M06), `DispatchRecommendation` (M07), `DiversionRoute` (M08), `ActionCard` + `ApprovalRecord` (M09), `ExecutionAudit` (M10), `VMSDelivery` (M11), `TransitImpactIndex` (M12), `ReplayBufferManifest` (M13), `GovernanceState` (M14). Immutable audit retention: dispatch/approval/execution 7 years; operational caches 24h–90d per entity TTL in module specs.
+`NormalizedEvent` (M01), `FeatureVector` (M02), `ImpactScore` (M03), `PropagationMap` (M04), `HotspotCluster` (M05), `PlannedEventPackage` (M06), `DispatchRecommendation` (M07), `DiversionRoute` (M08), `ActionCard` + `ApprovalRecord` (M09), `ExecutionAudit` (M10), `VMSDelivery` (M11), `TransitImpactIndex` (M12), `ReplayBufferManifest` (M13), `GovernanceState` (M14), `CitizenReport` + `CorridorSubscription` (M17). Immutable audit retention: dispatch/approval/execution 7 years; citizen photos 90d unless linked to verified incident (then 7 years); operational caches 24h–90d per entity TTL in module specs.
 
 ### 2.4 Layer Topology
 
-Presentation (M15, M16) → Facade (M09) → Optimization (M07, M08) + Planning (M06) → Intelligence (M03–M05) → Features (M02) → Ingestion (M01); Platform (M13, M14); Actuation (M10, M11); Advisory (M12).
+Presentation (M15, M16, M18) → Facade (M09) → Optimization (M07, M08) + Planning (M06) → Intelligence (M03–M05) → Features (M02) → Ingestion (M01, M17); Platform (M13, M14); Actuation (M10, M11); Advisory (M12).
 
 ---
 
@@ -162,6 +184,7 @@ flowchart TB
         ASTraM[ASTraM Incidents API]
         Portal[Planned Event Portal]
         Field[Field Reports / BOT]
+        Citizen[Citizen Photo Reports]
         OSM[OSM Road Graph]
         BMTC[BMTC GTFS-RT]
         StationAPI[Police Station APIs]
@@ -216,11 +239,18 @@ flowchart TB
     subgraph UI["Presentation"]
         M15[CommandDashboard]
         M16[FieldOfficerApp]
+        M18[CitizenApp]
+    end
+
+    subgraph CitizenIngest["M17 CitizenReportService"]
+        M17[Photo + GPS + ICT Quote]
     end
 
     ASTraM --> M01
     Portal --> M01
     Field --> M01
+    Citizen --> M17
+    M17 --> M01
     OSM --> M02
 
     M01 --> M02
@@ -273,6 +303,8 @@ flowchart TB
     M01 -->|outcomes| M13
 ```
 
+
+
 ### 3.1 Critical Path Latency Budget
 
 Ingest 80 ms → features 40 ms → impact 150 ms → GCDH 100 ms → dispatch ≤1,800 ms → card assembly 50 ms. PRD ≤350 ms applies to scoring path (steps 1–4 + skeleton); full dispatch via WebSocket within 1.8 s.
@@ -287,13 +319,15 @@ Sync: M01 ACK, M02 read, M09 skeleton, M14 tier, M16 packet. Async: M07 dispatch
 
 ### 4.1 Phase Matrix
 
-| Capability | MVP | 1.5 | 2 | 3 |
-|------------|-----|-----|---|---|
-| Ingest | M01 live | Webhook harden | SLO monitor | Multi-source |
-| Propagation | GCDH | Calibrated λ | Cascade priors | STGCN optional |
-| Dispatch | MILP+greedy | OR-Tools tune | Multi-incident | RL warm-start |
-| Actuation | M10–M12 stub | Live M10/M11 | M12 BMTC | MDT |
-| Learning | 80/20 + 94% gate | Auto promote | Monsoon retrain | Annual model |
+
+| Capability  | MVP              | 1.5            | 2               | 3              |
+| ----------- | ---------------- | -------------- | --------------- | -------------- |
+| Ingest      | M01 live         | Webhook harden | SLO monitor     | Multi-source   |
+| Propagation | GCDH             | Calibrated λ   | Cascade priors  | STGCN optional |
+| Dispatch    | MILP+greedy      | OR-Tools tune  | Multi-incident  | RL warm-start  |
+| Actuation   | M10–M12 stub     | Live M10/M11   | M12 BMTC        | MDT            |
+| Learning    | 80/20 + 94% gate | Auto promote   | Monsoon retrain | Annual model   |
+
 
 ### 4.2 Hackathon Demo Scope (Summary)
 
@@ -320,51 +354,59 @@ Deploy → Shadow Mode (M14) → Tier 1 full ops → Enable recommendation influ
 
 ### 5.1 PRD v3.0 Runtime Contract Map
 
-| PRD Contract | Budget | Owning Module(s) | Enforcement Mechanism |
-|--------------|--------|------------------|----------------------|
-| Event ingest → action-card candidate | ≤350 ms P95 | M01, M02, M03, M09 | Async ingestion; cached features; partial card before dispatch |
-| Dispatch optimization total | ≤1.8 s P95 | M07 | Dual-tier orchestrator; deadline watcher |
-| MILP solver window | **1.5 s hard cutoff** | M07 | Process kill / cancel token; no late overwrite |
-| Greedy fallback | ≤120 ms P95 | M07 | Heap partial sort O(n log n) |
-| Dashboard live update | ≤5 s | M15 | WebSocket delta push |
-| Planned event package | ≤10 s | M06 | Pre-indexed templates + corridor graph |
-| Agentic handoff post-approval | ≤200 ms | M10 | Fire-and-forget command queue |
-| VMS webhook delivery | ≤500 ms initial | M11 | Async retry + DLQ |
-| Replay 80/20 compliance | 100% | M13 | Manifest validation before train |
-| Classification accuracy gate | ≥94% | M13, M14 | Block promotion on fail |
-| Shadow mode | Until promoted | M14, M09 | `shadow_mode=true` disables actuation |
-| Tier 1/2/3 degradation | Always armed | M14 | Health probes → auto transition |
+
+| PRD Contract                         | Budget                | Owning Module(s)   | Enforcement Mechanism                                          |
+| ------------------------------------ | --------------------- | ------------------ | -------------------------------------------------------------- |
+| Event ingest → action-card candidate | ≤350 ms P95           | M01, M02, M03, M09 | Async ingestion; cached features; partial card before dispatch |
+| Dispatch optimization total          | ≤1.8 s P95            | M07                | Dual-tier orchestrator; deadline watcher                       |
+| MILP solver window                   | **1.5 s hard cutoff** | M07                | Process kill / cancel token; no late overwrite                 |
+| Greedy fallback                      | ≤120 ms P95           | M07                | Heap partial sort O(n log n)                                   |
+| Dashboard live update                | ≤5 s                  | M15                | WebSocket delta push                                           |
+| Planned event package                | ≤10 s                 | M06                | Pre-indexed templates + corridor graph                         |
+| Agentic handoff post-approval        | ≤200 ms               | M10                | Fire-and-forget command queue                                  |
+| VMS webhook delivery                 | ≤500 ms initial       | M11                | Async retry + DLQ                                              |
+| Replay 80/20 compliance              | 100%                  | M13                | Manifest validation before train                               |
+| Classification accuracy gate         | ≥94%                  | M13, M14           | Block promotion on fail                                        |
+| Shadow mode                          | Until promoted        | M14, M09           | `shadow_mode=true` disables actuation                          |
+| Tier 1/2/3 degradation               | Always armed          | M14                | Health probes → auto transition                                |
+
 
 ### 5.2 Degradation Tier Definitions
 
-| Tier | Trigger (any of) | System Behavior | Modules Affected |
-|------|------------------|-----------------|------------------|
-| **Tier 1 — Full** | All health checks green | MILP primary + greedy fallback + live scoring + dynamic routing | All MVP modules at full capability |
-| **Tier 2 — Constrained** | M03 model timeout; M02 cache partial miss; external API degraded | Offline diversion atlas; fallback-only dispatch; rule-based impact priors; reduced propagation hops | M03→rule priors; M07→greedy only; M04→2-hop GCDH |
-| **Tier 3 — Continuity** | M01 ingest failure; database unavailable; multi-module outage | Static BTP SOP templates; manual command mode; audit-only logging; no automated recommendations | M09 serves templates; M07 disabled; M15 shows manual mode banner |
+
+| Tier                     | Trigger (any of)                                                 | System Behavior                                                                                     | Modules Affected                                                 |
+| ------------------------ | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **Tier 1 — Full**        | All health checks green                                          | MILP primary + greedy fallback + live scoring + dynamic routing                                     | All MVP modules at full capability                               |
+| **Tier 2 — Constrained** | M03 model timeout; M02 cache partial miss; external API degraded | Offline diversion atlas; fallback-only dispatch; rule-based impact priors; reduced propagation hops | M03→rule priors; M07→greedy only; M04→2-hop GCDH                 |
+| **Tier 3 — Continuity**  | M01 ingest failure; database unavailable; multi-module outage    | Static BTP SOP templates; manual command mode; audit-only logging; no automated recommendations     | M09 serves templates; M07 disabled; M15 shows manual mode banner |
+
 
 Tier transitions are **automatic** with **manual override** from M14 GovernanceConsole. Every transition logs: `from_tier`, `to_tier`, `trigger`, `timestamp`, `operator_id` (if manual).
 
 ### 5.3 Replay Buffer Policy (Cross-Module)
 
-| Rule | Value | Owner |
-|------|-------|-------|
-| New incident share | 80% recently closed | M13 |
-| Anchor share | 20% stratified historical | M13 |
-| Stratification dimensions | corridor, cause, peak/off-peak, planned/unplanned | M13 |
-| Accuracy gate | ≥94% on governance-approved validation slice | M13 + M14 |
-| Anchor regression tolerance | No degradation beyond configured ε on anchor benchmark | M14 blocks promotion |
-| Anti-catastrophic-forgetting | Anchor slice must remain stable or improve vs prior model | M13 eval pipeline |
+
+| Rule                         | Value                                                     | Owner                |
+| ---------------------------- | --------------------------------------------------------- | -------------------- |
+| New incident share           | 80% recently closed                                       | M13                  |
+| Anchor share                 | 20% stratified historical                                 | M13                  |
+| Stratification dimensions    | corridor, cause, peak/off-peak, planned/unplanned         | M13                  |
+| Accuracy gate                | ≥94% on governance-approved validation slice              | M13 + M14            |
+| Anchor regression tolerance  | No degradation beyond configured ε on anchor benchmark    | M14 blocks promotion |
+| Anti-catastrophic-forgetting | Anchor slice must remain stable or improve vs prior model | M13 eval pipeline    |
+
 
 ### 5.4 Shadow Mode Contract
 
-| Behavior | Detail |
-|----------|--------|
-| Parallel run | AI recommendation computed alongside live operator decision |
-| UI display | Commander sees AI card + counterfactual; operator choice recorded |
-| Actuation block | M10, M11 reject all calls unless `shadow_mode=false` AND approval present |
-| Promotion gate | Shadow parity metrics over agreed window; zero critical regressions |
-| Metric capture | `shadow_recommendation`, `operator_action`, `delta`, `override_reason_code` |
+
+| Behavior        | Detail                                                                      |
+| --------------- | --------------------------------------------------------------------------- |
+| Parallel run    | AI recommendation computed alongside live operator decision                 |
+| UI display      | Commander sees AI card + counterfactual; operator choice recorded           |
+| Actuation block | M10, M11 reject all calls unless `shadow_mode=false` AND approval present   |
+| Promotion gate  | Shadow parity metrics over agreed window; zero critical regressions         |
+| Metric capture  | `shadow_recommendation`, `operator_action`, `delta`, `override_reason_code` |
+
 
 ### 5.5 Provenance & Audit
 
@@ -393,13 +435,15 @@ Expected: stable fallback dispatch, bounded latency, no starvation of high-RCI i
 
 ### 5.7 Identity, RBAC, and Override Codes
 
-| Role | Permissions |
-|------|-------------|
-| Commander | Approve recommendations, override tier (with reason), view shadow metrics |
-| Dispatcher | View assignments, acknowledge field packets |
-| Analyst | View replay manifests, promotion checklists |
-| Admin | Tier override, shadow mode toggle, model promotion sign-off |
-| Field Officer | Closure reporting, resource-used capture for M13 |
+
+| Role          | Permissions                                                               |
+| ------------- | ------------------------------------------------------------------------- |
+| Commander     | Approve recommendations, override tier (with reason), view shadow metrics |
+| Dispatcher    | View assignments, acknowledge field packets                               |
+| Analyst       | View replay manifests, promotion checklists                               |
+| Admin         | Tier override, shadow mode toggle, model promotion sign-off               |
+| Field Officer | Closure reporting, resource-used capture for M13                          |
+
 
 Standard override reason codes: `EXPERIENCE_OVERRIDE`, `LOCAL_INTEL`, `EQUIPMENT_UNAVAILABLE`, `POLITICAL_SENSITIVITY`, `MODEL_DISAGREE`, `OTHER` (free text required).
 
@@ -434,15 +478,18 @@ M01 is the single ingress point that validates, normalizes, and publishes `Norma
 **Responsibility boundary:** Ingestion and normalization only. No scoring, no dispatch, no UI. ASTraM remains system-of-record; M01 mirrors, does not replace.
 
 **Public interface contract:**
+
 - `POST /ingest/astram` — webhook receiver for ASTraM incident creates/updates
 - `POST /ingest/planned` — planned event portal submissions
 - `POST /ingest/field` — field officer supplemental reports
+- `POST /ingest/citizen` — triage events from M17 (`source=citizen`, `authenticated=false` until verified)
 - `GET /events/{event_id}` — normalized event by ID
 - `GET /health/ingest` — lag P95, error count, last successful batch
 - Event: `EventNormalized` — published on successful validation
 - Event: `EventClosed` — published when status transitions to closed with outcome fields
 
 **Core algorithms:**
+
 - Schema validation via declarative rules (required: lat/lon, cause, start_datetime)
 - Zone imputation: lat/lon → BBMP polygon join when `zone` null (recovers ~4,700 records)
 - Junction reverse-geocode from OSM registry when `junction` null
@@ -450,6 +497,7 @@ M01 is the single ingress point that validates, normalizes, and publishes `Norma
 - Anomaly flags: `closed_datetime < start_datetime`, coordinates outside bbox, `end_datetime` >72 h for planned
 
 **Storage/read models:**
+
 - Primary: `normalized_events` table (PostgreSQL), indexed by `event_id`, `corridor`, `status`, `start_datetime`
 - Read model: `active_events` materialized view for M05/M07 hot path
 - Dead letter: `ingest_rejects` with raw payload + violation reason
@@ -459,6 +507,7 @@ M01 is the single ingress point that validates, normalizes, and publishes `Norma
 **Latency contract:** Ingest ACK ≤350 ms P95; async enrichment handoff to M02 ≤50 ms after ACK
 
 **Degradation behavior:**
+
 - *Tier 1:* Full webhook + portal + field ingestion
 - *Tier 2:* ASTraM-only; portal queued; CSV batch replay for field
 - *Tier 3:* Read-only from last successful snapshot; `EventClosed` buffered locally for audit replay
@@ -479,7 +528,7 @@ M01 is the single ingress point that validates, normalizes, and publishes `Norma
 - Feature engineering (M02)
 - Model inference
 - Direct ASTraM schema migration
-- Citizen app ingestion
+- Citizen photo processing (M17); M01 only accepts normalized payloads from M17
 
 #### Further Notes
 
@@ -513,6 +562,7 @@ M02 maintains a shared feature cache and static graph index. On `EventNormalized
 **Responsibility boundary:** Feature computation and graph statics only. No model inference (M03), no routing (M08).
 
 **Public interface contract:**
+
 - `GET /features/{event_id}` — full `FeatureVector` for an event
 - `GET /features/batch` — POST body with event_id list
 - `GET /graph/centrality/{node_id}` — betweenness, degree, edge list with weights
@@ -523,13 +573,16 @@ M02 maintains a shared feature cache and static graph index. On `EventNormalized
 **Core algorithms:**
 
 *RCI (Road Congestion Impact index) components:*
+
 ```
 RCI = w1 * p_closure_prior + w2 * log_ict_prior + w3 * betweenness_norm
     + w4 * cause_severity_rank + w5 * is_named_corridor + w6 * simultaneous_events_2km
 ```
+
 Weights calibrated on training set; `p_closure_prior` from corridor×cause table.
 
 *Cyclical temporal encoding:*
+
 ```
 hour_sin = sin(2π × hour_ist / 24)
 hour_cos = cos(2π × hour_ist / 24)
@@ -539,21 +592,25 @@ dow_cos  = cos(2π × dow / 7)
 
 *14:00–18:00 IST bias correction:*
 Historical logged events show only 384 records in 14:00–17:59 vs 1,329 in 07:00–09:59 despite true evening peak traffic 17:00–21:00. Apply per-hour inverse reporting probability weights:
+
 ```
 weight(hour_ist) = global_hour_rate / logged_hour_rate
 # Elevated weights for hours 14, 15, 16, 17, 18 (typically 2.5–4.0×)
 ```
+
 Used in training sample weights (M13) and live RCI adjustment during evening window.
 
 *Betweenness centrality:* Computed on Bengaluru OSM drivable graph via NetworkX; cached per road segment node. ORR and Bellary Road segments rank highest.
 
 *Corridor×cause historical features:*
+
 - `corridor_cause_closure_rate_30d` — rolling 30-day P(closure)
 - `corridor_cause_median_ict_7d` — rolling 7-day median clearance
 - `cause_median_resolution_global` — all-time cause prior (vehicle_breakdown 0.7h, pot_holes 32.1h)
 - `same_cause_corridor_7d` — recurrence count
 
 **Storage/read models:**
+
 - Redis: `feature:{event_id}` TTL 24h; `centrality:{node_id}` TTL 30d
 - PostgreSQL: `corridor_cause_priors`, `hour_bias_weights`, `osm_graph_edges`
 - PostGIS: spatial joins for zone imputation, H3 cell lookup
@@ -563,6 +620,7 @@ Used in training sample weights (M13) and live RCI adjustment during evening win
 **Latency contract:** Feature read ≤50 ms P95 on cache hit; ≤200 ms on cache miss (compute + store)
 
 **Degradation behavior:**
+
 - *Tier 1:* Full feature vector with live rolling priors
 - *Tier 2:* Static priors from last daily snapshot; skip mBERT embeddings (use keyword NLP only)
 - *Tier 3:* Cause×corridor lookup table only (Phase 0 baselines); no graph queries
@@ -615,6 +673,7 @@ M03 serves two model families: (1) **LightGBM closure classifier** with `scale_p
 **Responsibility boundary:** Inference only. Training orchestration in M13. Features from M02. No dispatch logic.
 
 **Public interface contract:**
+
 - `POST /impact/score` — body: `{ event_id }` or inline feature vector; returns `ImpactScore`
 - `POST /impact/score/batch` — up to 50 events
 - `GET /impact/explain/{event_id}` — SHAP top-5 features
@@ -623,6 +682,7 @@ M03 serves two model families: (1) **LightGBM closure classifier** with `scale_p
 **Core algorithms:**
 
 *Closure classifier (LightGBM):*
+
 - Target: `requires_road_closure` (8.3% positive)
 - Features: M02 vector + NLP keyword flags + `is_planned` + corridor×cause priors
 - `scale_pos_weight=11`; calibrated via isotonic regression on validation fold
@@ -630,6 +690,7 @@ M03 serves two model families: (1) **LightGBM closure classifier** with `scale_p
 - Target accuracy: **94%** on governance-approved operational slice (with precision-recall tradeoff documented)
 
 *ICT survival (Cox PH primary, AFT secondary):*
+
 - 61.6% censored (no `closed_datetime`) — Cox PH uses partial likelihood
 - Output: survival curve S(t) → invert for P20/P50/P80 hours
 - AFT (Weibull/Log-normal) for direct quantile output when PH assumptions fail anchor slice
@@ -641,6 +702,7 @@ M03 serves two model families: (1) **LightGBM closure classifier** with `scale_p
 *Structural priority:* `priority_structural = is_named_corridor` (not raw ASTraM priority field for severity).
 
 **Storage/read models:**
+
 - Model artifacts in MLflow registry (M13 promotes)
 - `impact_scores` append-only log: event_id, version, scores, timestamp
 - In-memory model cache with warm reload on promotion
@@ -650,6 +712,7 @@ M03 serves two model families: (1) **LightGBM closure classifier** with `scale_p
 **Latency contract:** ≤200 ms P95 per score; batch 50 events ≤1 s
 
 **Degradation behavior:**
+
 - *Tier 1:* Full LightGBM + Cox PH
 - *Tier 2:* Rule-based priors: `is_planned` → 0.36 closure prior; cause median ICT lookup; no SHAP
 - *Tier 3:* Static BTP SOP templates by cause (vip_movement always stage barricades)
@@ -702,6 +765,7 @@ M04 implements **Graph-Centrality Decay Heuristic (GCDH)** exclusively in Phase 
 **Responsibility boundary:** Spatial risk propagation only. Impact scoring (M03) provides seed risk. No routing.
 
 **Public interface contract:**
+
 - `POST /propagation/ripple` — `{ event_id, seed_rci, max_hops?, epsilon? }` → `PropagationMap`
 - `GET /propagation/active` — all active incident ripple maps
 - `GET /propagation/config` — current lambda, k, epsilon defaults
@@ -709,19 +773,23 @@ M04 implements **Graph-Centrality Decay Heuristic (GCDH)** exclusively in Phase 
 **Core algorithms:**
 
 **GCDH formula (authoritative):**
+
 ```
 risk_{t+1}(v) = Σ_u risk_t(u) × edge_weight(u,v) × exp(-λ × hop_distance) × (1 + k × betweenness(v))
 ```
 
-| Parameter | Default | Meaning |
-|-----------|---------|---------|
-| `λ` (lambda) | 0.35 | Hop decay rate |
-| `k` | 0.15 | Centrality amplification |
-| `epsilon` | 0.02 | Stop when marginal propagated risk < ε |
+
+| Parameter     | Default                            | Meaning                                  |
+| ------------- | ---------------------------------- | ---------------------------------------- |
+| `λ` (lambda)  | 0.35                               | Hop decay rate                           |
+| `k`           | 0.15                               | Centrality amplification                 |
+| `epsilon`     | 0.02                               | Stop when marginal propagated risk < ε   |
 | `edge_weight` | OSM lane-count normalized capacity | Higher capacity edges transmit more risk |
-| `max_hops` | 5 | Hard cap for latency |
+| `max_hops`    | 5                                  | Hard cap for latency                     |
+
 
 Algorithm steps:
+
 1. Map event lat/lon → nearest graph node (incident corridor node)
 2. Initialize `risk_t(seed) = RCI` from M03
 3. BFS/DFS hop expansion applying GCDH update until epsilon or max_hops
@@ -729,6 +797,7 @@ Algorithm steps:
 5. Return node list with risk, hop, parent edge for explainability
 
 **Storage/read models:**
+
 - Ephemeral: in-memory `PropagationMap` per active event (Redis, TTL = event active duration)
 - Config: `gcdh_params` versioned table
 - No persistent storage required for MVP beyond audit log
@@ -738,6 +807,7 @@ Algorithm steps:
 **Latency contract:** ≤150 ms P95 for 3-hop propagation on Bengaluru graph
 
 **Degradation behavior:**
+
 - *Tier 1:* Full GCDH up to 5 hops
 - *Tier 2:* 2-hop GCDH with static lambda; no live RCI refresh
 - *Tier 3:* Single-node seed only (no propagation); `CascadeRisk = RCI`
@@ -790,18 +860,21 @@ M05 combines unsupervised spatial clustering (DBSCAN/HDBSCAN on H3 res7 cells) f
 **Responsibility boundary:** Hotspot detection and forecast only. Not full anomaly response workflow.
 
 **Public interface contract:**
+
 - `GET /hotspots/observed` — current DBSCAN clusters with H3 cells, density, cause entropy
 - `GET /hotspots/predicted?horizon_hours=4` — Poisson intensity forecast by corridor/zone
 - `GET /hotspots/anomalies` — CUSUM alerts last 24 h
 - `GET /hotspots/cell/{h3_res7}` — cell history summary
 
 **Core algorithms:**
+
 - Observed: DBSCAN on (lat, lon) weighted by event count; H3 res7 (~1.2 km) aggregation
 - Predicted: Poisson GLM `E[count] ~ corridor + hour_sin/cos + dow + is_weekend` with bias weights from M02
 - Anomaly: rolling 30-min zone rate vs baseline; alert at ≥3σ
 - Known validation: top-10 clusters should include Bellandur flyover zone (12.969, 77.701, 65 historical events)
 
 **Storage/read models:**
+
 - `hotspot_clusters` refreshed every 5 min
 - `poisson_forecast_cache` refreshed every 6 h
 - Redis geo index for 2 km radius queries
@@ -811,6 +884,7 @@ M05 combines unsupervised spatial clustering (DBSCAN/HDBSCAN on H3 res7 cells) f
 **Latency contract:** Observed query ≤100 ms P95; predicted ≤200 ms (cached)
 
 **Degradation behavior:**
+
 - *Tier 1:* Observed + predicted + anomaly
 - *Tier 2:* Observed only; static 24 h forecast from last cache
 - *Tier 3:* Hardcoded top-10 historical BTP black spots list
@@ -861,11 +935,13 @@ M06 matches incoming planned events to historical templates by cause×corridor×
 **Responsibility boundary:** Planned event package generation. Not unplanned incident scoring.
 
 **Public interface contract:**
+
 - `POST /planned/package` — `{ event_id }` or planned event payload → `PlannedEventPackage`
 - `GET /planned/upcoming?hours=72` — list of packages for timeline
 - `GET /templates/{cause}` — raw template definition
 
 **Core algorithms:**
+
 - Template matching: nearest neighbor on (cause, corridor, dow, hour_ist, estimated_duration)
 - Rule-based staffing prior (from research §9.2): construction 3–8 officers, vip_movement 8–20, procession 6–15
 - Barricade count: road type × closure type matrix (dual carriageway full closure = 8 barricades)
@@ -873,6 +949,7 @@ M06 matches incoming planned events to historical templates by cause×corridor×
 - Impact overlay: M03 `p_closure`, ICT P50, severity band 1–5 ordinal
 
 **Storage/read models:**
+
 - `planned_templates` — 5 cause types minimum for MVP (construction, public_event, procession, vip_movement, protest)
 - `planned_packages` — generated artifacts per event
 - Pre-indexed corridor graph for 10 s SLA
@@ -882,6 +959,7 @@ M06 matches incoming planned events to historical templates by cause×corridor×
 **Latency contract:** Package generation ≤10 s P95; cached template lookup ≤500 ms
 
 **Degradation behavior:**
+
 - *Tier 1:* Full ML-enriched package
 - *Tier 2:* Rule-only templates without live M03 (use cause×corridor priors)
 - *Tier 3:* Static PDF-equivalent SOP checklist per cause
@@ -932,6 +1010,7 @@ M07 implements **non-blocking dual-tier dispatch**: start MILP with **1.5 s hard
 **Responsibility boundary:** Unit-to-incident assignment optimization. Not route planning (M08) or station API calls (M10).
 
 **Public interface contract:**
+
 - `POST /dispatch/recommend` — `{ event_id, active_incidents?, available_units? }` → `DispatchRecommendation`
 - `GET /dispatch/status/{recommendation_id}` — async completion status if partial
 - Event: `DispatchCompleted` — includes provenance
@@ -939,28 +1018,35 @@ M07 implements **non-blocking dual-tier dispatch**: start MILP with **1.5 s hard
 **Core algorithms:**
 
 *Primary — MILP (OR-Tools / PuLP):*
+
 - **Objective:** minimize weighted travel time + uncovered risk
+
 ```
 min Σ_{i,j} x_{ij} × (travel_time_{ij} + α × uncovered_risk_i)
 ```
+
 - **Constraints:** each incident covered ≥1 unit; each unit ≤1 incident; station capacity; shift windows; equipment compatibility (heavy tow for heavy vehicle); standby minimums per zone
 - **Hard cutoff:** 1.5 s — cancel solver thread; emit GREEDY_FALLBACK if no feasible solution
 
 *Fallback — Greedy O(n log n):*
+
 ```
 score(unit, incident) = α × ETA(unit, incident) + β × RCI(incident)
                       + γ × CorridorCentrality(incident) + δ × CascadeRisk(incident)
 ```
+
 - Rank all (unit, incident) pairs via min-heap / partial sort
 - **Tie-breakers (deterministic):** station_id ASC, unit_id ASC
 - Default weights: α=1.0, β=0.4, γ=0.25, δ=0.35 (tunable via M14 config)
 
 *Non-blocking guarantee:*
+
 1. Return GREEDY_FALLBACK within 120 ms P95 if MILP not done by 1.5 s
 2. If MILP completes before 1.5 s with feasible solution, return MILP result
 3. Late MILP results logged but **not** published if fallback already issued (idempotent recommendation_id)
 
 **Storage/read models:**
+
 - `dispatch_recommendations` immutable audit table
 - In-memory unit availability from station roster API (cached 60 s)
 - Travel time matrix: OSM shortest path precomputed station→corridor centroids
@@ -970,6 +1056,7 @@ score(unit, incident) = α × ETA(unit, incident) + β × RCI(incident)
 **Latency contract:** Total ≤1.8 s P95; MILP cutoff 1.5 s hard; greedy ≤120 ms P95
 
 **Degradation behavior:**
+
 - *Tier 1:* MILP + greedy
 - *Tier 2:* Greedy only (MILP disabled)
 - *Tier 3:* Nearest-unit rule with RCI sort only; manual override required for multi-incident
@@ -1022,18 +1109,21 @@ M08 maintains a **pre-computed diversion atlas** for top-50 closure-prone juncti
 **Responsibility boundary:** Route alternatives and atlas management. Not VMS delivery (M11) or user equilibrium simulation (Phase 3).
 
 **Public interface contract:**
+
 - `GET /diversions/atlas/{junction_id}` — pre-computed top-k routes
 - `POST /diversions/compute` — on-demand k-shortest for uncached junction
 - `GET /diversions/scenarios/{event_id}` — ranked alternatives with ETA delta, gridlock flags
 - `POST /diversions/validate` — cyclic gridlock check on proposed path
 
 **Core algorithms:**
+
 - Atlas build (offline weekly): Yen's k-shortest paths (k=3) avoiding closure-prone segments; rank by historical corridor load at event hour
 - Runtime: atlas lookup O(1); on-demand Dijkstra + Yen for cache miss
 - Cyclic gridlock detection: strongly connected component check on diverted flow graph; flag if route re-enters closed edge set or total diverted volume > 70% secondary capacity estimate
 - Activation policy: auto-suggest when P(closure) > 0.5 AND `is_peak_hour`
 
 **Storage/read models:**
+
 - `diversion_atlas` — junction_id, k, path polyline, eta_delta, capacity_class
 - PostGIS `route_path` geometries
 - Weekly refresh job + on-demand invalidation on OSM update
@@ -1043,6 +1133,7 @@ M08 maintains a **pre-computed diversion atlas** for top-50 closure-prone juncti
 **Latency contract:** Atlas lookup ≤80 ms P95; on-demand compute ≤2 s (not on critical path)
 
 **Degradation behavior:**
+
 - *Tier 1:* Atlas + on-demand + live rerank (Phase 2 speed)
 - *Tier 2:* Atlas only; no on-demand compute
 - *Tier 3:* Static top-1 diversion per major corridor from BTP SOP
@@ -1094,6 +1185,7 @@ M09 is the human-in-the-loop facade. It orchestrates parallel calls to M03–M08
 **Responsibility boundary:** Aggregation, approval workflow, API facade. No model training, no solver logic.
 
 **Public interface contract:**
+
 - `GET /recommendations/{event_id}` — full or partial `ActionCard`
 - `POST /recommendations/{event_id}/refresh` — force recompute
 - `POST /recommendations/{id}/approve` — `{ commander_id, override_codes? }` → triggers M10/M11 if enabled
@@ -1102,6 +1194,7 @@ M09 is the human-in-the-loop facade. It orchestrates parallel calls to M03–M08
 - WebSocket: `recommendation.updated` — delta when dispatch completes
 
 **Core algorithms:**
+
 - Parallel fan-out: M03 + M04 + M05 in first 300 ms; M07 async with callback
 - Card skeleton at 350 ms: scores, propagation summary, hotspot context, "dispatch pending"
 - Card complete at 1.8 s: dispatch assignments + provenance appended
@@ -1109,6 +1202,7 @@ M09 is the human-in-the-loop facade. It orchestrates parallel calls to M03–M08
 - Alert prioritization: CRITICAL if P(closure)>0.7 AND named corridor AND peak hour
 
 **Storage/read models:**
+
 - `action_cards` with status: `partial | complete | approved | rejected | executed`
 - `approval_records` immutable
 - Link to `DispatchRecommendation`, `ImpactScore`, `PropagationMap` IDs
@@ -1118,6 +1212,7 @@ M09 is the human-in-the-loop facade. It orchestrates parallel calls to M03–M08
 **Latency contract:** Skeleton ≤350 ms P95; complete ≤1.8 s P95 (dispatch-bound)
 
 **Degradation behavior:**
+
 - *Tier 1:* Full card with MILP/greedy dispatch
 - *Tier 2:* Card without live M03 (rule priors); greedy dispatch only
 - *Tier 3:* SOP template card; no dispatch section; manual mode banner
@@ -1169,6 +1264,7 @@ M10 consumes approval events from M09 and fires commands to police station APIs 
 **Responsibility boundary:** Post-approval command execution only. Not recommendation generation.
 
 **Public interface contract:**
+
 - `POST /execute/dispatch` — internal; triggered by M09 approval
 - `GET /execute/status/{execution_id}`
 - `POST /execute/retry/{execution_id}` — manual retry (admin)
@@ -1176,6 +1272,7 @@ M10 consumes approval events from M09 and fires commands to police station APIs 
 - Mock (MVP): `POST /mock/station/ack` — hackathon demo endpoint
 
 **Core algorithms:**
+
 - Fire-and-forget command queue (Redis Streams / SQS-compatible)
 - Idempotent execution keyed by `approval_id`
 - Barricade reservation: POST to BTP asset API with event geo + count from M06 package
@@ -1183,6 +1280,7 @@ M10 consumes approval events from M09 and fires commands to police station APIs 
 - 200 ms handoff = enqueue only, not wait for station ACK
 
 **Storage/read models:**
+
 - `execution_audit` immutable
 - `execution_queue` with status machine
 
@@ -1191,6 +1289,7 @@ M10 consumes approval events from M09 and fires commands to police station APIs 
 **Latency contract:** Enqueue ≤200 ms P95; station ACK async (SLA not guaranteed by M10)
 
 **Degradation behavior:**
+
 - *Tier 1:* Live station APIs (Phase 1.5)
 - *Tier 2:* Queue commands; retry when API recovers
 - *Tier 3:* Audit-only log; manual phone dispatch SOP
@@ -1241,18 +1340,21 @@ M11 converts M08 diversion graphs to board-friendly text via regional templates 
 **Responsibility boundary:** VMS webhook orchestration. Not diversion computation (M08).
 
 **Public interface contract:**
+
 - `POST /vms/push` — internal; `{ diversion_id, board_ids[], template_region }`
 - `GET /vms/status/{delivery_id}`
 - `POST /vms/retry/{delivery_id}`
 - Mock (MVP): `POST /mock/vms/receive` — captures payload for demo
 
 **Core algorithms:**
+
 - Template engine: path → "USE ALT: Hosur Rd → Bannerghata Rd" (max 120 chars)
 - Fanout: parallel webhook POST per board_id
 - Retry: 3× exponential backoff; DLQ on persistent failure
 - Confirmation: parse webhook 200 + `ack_id` from vendor
 
 **Storage/read models:**
+
 - `vms_deliveries` with status, retry_count, dead_letter_flag
 - `vms_board_registry` — board_id, endpoint, region template
 
@@ -1261,6 +1363,7 @@ M11 converts M08 diversion graphs to board-friendly text via regional templates 
 **Latency contract:** Initial fanout ≤500 ms; confirmation async
 
 **Degradation behavior:**
+
 - *Tier 1:* Live webhooks (Phase 1.5)
 - *Tier 2:* Queue for retry; SMS fallback to station (optional integration)
 - *Tier 3:* Manual VMS entry SOP; export text to clipboard in M15
@@ -1309,20 +1412,24 @@ M12 overlays BMTC schedule and real-time AVL with M03 predicted corridor delay t
 **Responsibility boundary:** Transit impact estimation advisory. Not bus rerouting or BMTC control.
 
 **Public interface contract:**
+
 - `GET /transit/impact/{event_id}` — `TransitImpactIndex`
 - `GET /transit/routes/affected?corridor=` — route list with passenger estimates
 - Mock (MVP): `GET /mock/transit/demo` — canned index for hackathon
 
 **Core algorithms:**
+
 ```
 passenger_delay_index = Σ_route (avg_occupancy × predicted_delay_minutes × overlap_fraction)
 transfer_overload_risk = f(diversions ∩ transfer_hub, headway_reduction)
 ```
+
 - Route-corridor spatial join: BMTC route polyline ∩ event corridor buffer
 - Delay: M03 ICT P50 applied as corridor travel time multiplier
 - Occupancy: historical GTFS-RT load factors or default 45 passengers/bus peak
 
 **Storage/read models:**
+
 - `bmtc_route_corridor_map` static
 - `transit_impact_cache` per event, TTL 15 min
 - GTFS-RT ingest (Phase 2)
@@ -1332,6 +1439,7 @@ transfer_overload_risk = f(diversions ∩ transfer_hub, headway_reduction)
 **Latency contract:** ≤2 s P95 with live GTFS-RT; mock ≤50 ms
 
 **Degradation behavior:**
+
 - *Tier 1:* Live GTFS-RT (Phase 2)
 - *Tier 2:* Scheduled timetable only (no real-time)
 - *Tier 3:* Static "BMTC may be affected" advisory template
@@ -1382,6 +1490,7 @@ M13 builds replay buffers with **80% newly closed incidents + 20% historical anc
 **Responsibility boundary:** Buffer construction, retrain orchestration, evaluation, promotion recommendation. M14 executes promotion gate.
 
 **Public interface contract:**
+
 - `POST /learning/retrain` — trigger job `{ trigger: scheduled|drift|manual }`
 - `GET /learning/buffer/manifest/{job_id}` — 80/20 stats, stratification table
 - `GET /learning/eval/{job_id}` — accuracy, anchor slice, calibration metrics
@@ -1391,25 +1500,30 @@ M13 builds replay buffers with **80% newly closed incidents + 20% historical anc
 **Core algorithms:**
 
 *Buffer construction:*
+
 ```
 buffer = 0.8 × recent_closed(N weeks) ∪ 0.2 × anchor_sample(stratified)
 strata = corridor × cause × peak_flag × is_planned
 ```
+
 - Recent window: default 4 weeks rolling
 - Anchor pool: fixed historical sample refreshed monthly, min 1,500 records
 - Sample weights: include M02 14:00–18:00 IST bias weights
 
 *Training:*
+
 - Closure: LightGBM with scale_pos_weight, temporal CV (no shuffle)
 - ICT: Cox PH + optional AFT; censored loss for 61.6% missing `closed_datetime`
 - Anti-catastrophic-forgetting: anchor slice accuracy must not drop > ε vs incumbent
 
 *Promotion gate:*
+
 - Primary: ≥**94%** accuracy on governance-approved operational validation slice
 - Secondary: anchor slice stable or improved
 - Tertiary: shadow mode stability (M14) passing
 
 **Storage/read models:**
+
 - `replay_buffer_manifests`
 - MLflow experiment tracking
 - `model_registry` with staged → production lifecycle
@@ -1420,6 +1534,7 @@ strata = corridor × cause × peak_flag × is_planned
 **Latency contract:** Weekly batch; eval job <30 min; promotion decision async
 
 **Degradation behavior:**
+
 - *Tier 1:* Full automated retrain
 - *Tier 2:* Eval only, no promotion
 - *Tier 3:* Frozen model; manual retrain after recovery
@@ -1472,6 +1587,7 @@ M14 owns **shadow mode**, **Tier 1/2/3** automatic transitions with manual overr
 **Responsibility boundary:** Platform governance, tier state, shadow flag, promotion gates, health probes, drill orchestration. Not business logic of scoring or dispatch.
 
 **Public interface contract:**
+
 - `GET /governance/tier` — `{ tier: 1|2|3, shadow_mode: bool, flags: {} }`
 - `POST /governance/override-tier` — `{ tier, reason, operator_id }`
 - `POST /governance/shadow-mode` — `{ enabled: bool }` (admin only)
@@ -1481,6 +1597,7 @@ M14 owns **shadow mode**, **Tier 1/2/3** automatic transitions with manual overr
 - `POST /governance/drills/cascade` — trigger or view last drill result
 
 **Core algorithms:**
+
 - Health probes: M01 lag, M03 P95, M07 timeout rate, M02 cache hit, external API status
 - Tier auto-transition rules:
   - M03 down → Tier 2
@@ -1490,6 +1607,7 @@ M14 owns **shadow mode**, **Tier 1/2/3** automatic transitions with manual overr
 - Cascade drill: inject 5 concurrent ORR closures + forced MILP timeout; score M07+M09
 
 **Storage/read models:**
+
 - `governance_state` singleton with audit log
 - `tier_transitions` immutable
 - `shadow_metrics_daily`
@@ -1500,6 +1618,7 @@ M14 owns **shadow mode**, **Tier 1/2/3** automatic transitions with manual overr
 **Latency contract:** Tier read ≤1 s; probe cycle 30 s
 
 **Degradation behavior:**
+
 - M14 itself is Tier 3 last-resort: embedded tier defaults in M15/M16 clients if M14 unreachable (default Tier 3, shadow true)
 
 **Phase scope:** MVP — full tiers + shadow + manual promotion. Phase 1.5 — automated promotion on checklist pass.
@@ -1543,23 +1662,27 @@ M15 is the web command dashboard consuming M09 action cards, M05 hotspots, M14 g
 6. As a commander in shadow mode, I need AI recommendation vs my action side-by-side.
 7. As an event coordinator, I need 72-hour planned event timeline (M06).
 8. As an admin, I need health panel from M14 and drill results tab.
+9. As a commander, I need citizen-reported events in a separate triage queue with photo thumbnail, ICT bands, and verify/reject actions (M17).
 
 #### Implementation Decisions
 
 **Responsibility boundary:** Commander UI. No server-side business logic beyond presentation state.
 
 **Public interface contract:**
+
 - Web UI routes: `/live`, `/planned`, `/governance`, `/analytics`
 - WebSocket: `dashboard.delta` — subscribes to M09, M05, M14 events
 - REST proxy to M09, M14, M05, M06 (no direct M07 calls)
 
 **Core algorithms:**
+
 - Client-side map: Kepler.gl or MapLibre with H3 hex layers
 - Alert queue sort: RCI × P(closure) × is_peak_hour descending
 - Partial card render: skeleton at 350 ms, dispatch section streams in
 - Shadow UI: dual column AI vs operator choice
 
 **Storage/read models:**
+
 - Client state only; optional `user_preferences` (map center, filters)
 
 **Dependencies:** M09, M05, M06, M14; stub indicators for M10, M11, M12 in MVP
@@ -1567,6 +1690,7 @@ M15 is the web command dashboard consuming M09 action cards, M05 hotspots, M14 g
 **Latency contract:** WebSocket delta ≤5 s from upstream event
 
 **Degradation behavior:**
+
 - *Tier 1:* Full dashboard
 - *Tier 2:* Hide MILP provenance detail; show greedy only; static forecast
 - *Tier 3:* Manual mode layout; SOP template links; audit-only submit
@@ -1584,7 +1708,7 @@ M15 is the web command dashboard consuming M09 action cards, M05 hotspots, M14 g
 
 - Field officer mobile layout (M16)
 - ASTraM native UI replacement
-- Citizen-facing app
+- Full ASTraM citizen app replacement (fines, violations) — M18 is report + pre-alert only
 
 #### Further Notes
 
@@ -1618,17 +1742,20 @@ M16 is the mobile-optimized field interface consuming M09/M07 outputs. Displays 
 **Responsibility boundary:** Field UI + closure outcome capture. Not dispatch optimization.
 
 **Public interface contract:**
+
 - `GET /field/packet/{assignment_id}` — assignment bundle
 - `POST /field/ack/{assignment_id}` — officer acknowledgement
 - `POST /field/close/{event_id}` — `{ closed_datetime, barricades_used, officers_used, diversion_activated, notes }`
 - `GET /field/tier` — proxy to M14 for mobile badge
 
 **Core algorithms:**
+
 - Packet assembly from M07 `DispatchRecommendation` + M03 quantiles + M08 top diversion
 - Offline: service worker caches last packet; closure queues for sync
 - Closure form validation: barricades_used ≥0 integer; officers_used ≥1
 
 **Storage/read models:**
+
 - `field_closures` → forwarded to M01 as `EventClosed` enrichment
 - Mobile local storage for offline queue
 
@@ -1637,6 +1764,7 @@ M16 is the mobile-optimized field interface consuming M09/M07 outputs. Displays 
 **Latency contract:** Packet render ≤3 s on 4G; ACK ≤1 s
 
 **Degradation behavior:**
+
 - *Tier 1:* Full packet with live data
 - *Tier 2:* Cached ICT bands; simplified diversion text
 - *Tier 3:* Station SOP PDF link; manual closure form only
@@ -1662,33 +1790,198 @@ Closure capture addresses 98.4% missing `assigned_to_police_id` by instrumenting
 
 ---
 
+### M17 — CitizenReportService
+
+#### Problem Statement
+
+Commuters encounter blockages before authorities log them in ASTraM. ASTraM historical data has no image attachments (`map_file` 100% null) and sparse `citizen_accident_id` (98.4% missing), but device GPS + photo reports can extend sensing. Citizens need immediate **location snap** and **ICT clearance bands** from corridor×cause history while commanders retain verification control.
+
+#### Solution
+
+M17 accepts photo uploads with required device GPS (EXIF GPS as fallback), snaps coordinates to H3 res7 / nearest corridor / junction via M02, infers optional `cause_hint` from description keywords (regex MVP; mBERT Phase 2), calls M03 for `ict_p50`/`ict_p80` and `p_closure`, stores the photo reference, and forwards a triage `NormalizedEvent` to M01 with `source=citizen` and `authenticated=false`. Commanders verify via `POST /citizen/verify/{report_id}` before the event enters standard M09 dispatch.
+
+#### User Stories
+
+1. As a commuter, I need to submit a photo and GPS so my report reaches the command center within seconds.
+2. As a commuter, I need P50/P80 clearance time bands based on similar past incidents before I decide to wait or reroute.
+3. As a commander, I need citizen reports visually distinct on M15 until I authenticate them.
+4. As a commander, I need the snapped corridor/junction and photo thumbnail on the triage card.
+5. As an analyst, I need `cause_hint` confidence scores so low-confidence reports are flagged for manual review.
+6. As a governance admin, I need citizen photos retained 90 days unless linked to a verified incident.
+7. As a learning pipeline owner, I need verified citizen reports to enrich M13 with ground-truth labels.
+8. As a subscriber, I need M05/M04 deltas matched against my corridor subscriptions for pre-alerts (fanout to M18).
+
+#### Implementation Decisions
+
+**Responsibility boundary:** Citizen report ingest, geocoding, ICT quote, triage forwarding, subscription matching. Not dispatch (M07), not commander UI (M15), not commuter UI (M18).
+
+**Public interface contract:**
+
+- `POST /citizen/report` — multipart: `photo`, `lat`, `lon`, optional `description` → `CitizenReport` with `report_id`, `h3_cell`, `corridor`, `junction`, `ict_p50`, `ict_p80`, `p_closure`, `cause_hint`, `cause_confidence`
+- `GET /citizen/report/{report_id}` — status (`pending` | `verified` | `rejected`) + ICT quote
+- `POST /citizen/verify/{report_id}` — commander auth → promotes M01 event, triggers M09 scoring path
+- `POST /citizen/reject/{report_id}` — `{ reason_code }` → audit only
+- `POST /citizen/subscribe` — `{ user_ref, corridors[] | h3_cells[] }` → subscription id
+- `DELETE /citizen/subscribe/{id}` — unsubscribe
+- Event: `CitizenReportSubmitted` — `{ report_id, lat, lon, corridor, ict bands, photo_ref }`
+- Event: `CitizenPreAlert` — `{ subscription_id, alert_type: hotspot|propagation, severity_band }`
+
+**Core algorithms:**
+
+1. **Location snap:** device GPS primary; EXIF `GPSLatitude`/`GPSLongitude` if device coords absent; reject if neither within Bengaluru bbox.
+2. **Spatial join:** lat/lon → H3 res7 → nearest corridor polygon + junction from M02/OSM registry.
+3. **Cause hint (MVP):** keyword regex (`water`, `accident`, `breakdown`, `tree`, `pothole`) → map to 17-class vocabulary; default `unknown_obstruction` with low confidence.
+4. **ICT quote:** build provisional `FeatureVector` from snap + cause_hint → M03 `POST /impact/score` → return quantiles to citizen immediately.
+5. **Triage forward:** `POST /ingest/citizen` on M01 with `authenticated=false`, `priority=Low` until verified.
+6. **Pre-alert matcher (async):** on M05 cluster update or M04 ripple crossing H3 cell, fan out `CitizenPreAlert` to matching subscriptions.
+
+**Storage/read models:**
+
+- `citizen_reports` — report metadata, photo object-store ref, ICT quote snapshot, verification state
+- `corridor_subscriptions` — user_ref, corridor list or H3 cells, created_at
+- Photo store: S3-compatible; max 5 MB; JPEG/PNG; strip EXIF PII except GPS after ingest
+
+**Dependencies:** M02 (H3, corridor snap), M03 (ICT quote), M01 (triage event), M05/M04 (pre-alert triggers), M14 (rate limits)
+
+**Latency contract:** Report ACK with location snap + ICT quote ≤2 s P95; verify handoff ≤500 ms
+
+**Degradation behavior:**
+
+- *Tier 1:* Full photo + GPS + M03 quote + pre-alert fanout
+- *Tier 2:* GPS-only (skip photo storage); ICT from corridor×hour template without live M03
+- *Tier 3:* Queue reports locally on client; show static "report received, verification delayed" message
+
+**Phase scope:** MVP — GPS/EXIF geocode + keyword cause hint + M03 quote. Phase 2 — vision landmark snap when GPS unavailable. Phase 1.5 — ASTraM citizen app push bridge for pre-alerts.
+
+#### Testing Decisions
+
+- GPS + photo → corridor snap matches manual H3 calculation on 20 fixtures
+- Missing GPS and missing EXIF → 400 with clear error
+- ICT quote returned before M01 ingest completes
+- Unverified citizen event does not trigger M07 dispatch
+- Verify → M09 action card appears with `source=CITIZEN`
+- Subscription H3 overlap → `CitizenPreAlert` within 10 s of M05 update (integration)
+
+#### Out of Scope
+
+- Automated dispatch from unverified reports
+- Vision-only geolocation without GPS/EXIF (Phase 2)
+- Fines, violations, or payment flows (ASTraM scope)
+- Image moderation / NSFW filtering (defer to Phase 2 CDN policy)
+
+#### Further Notes
+
+EDA confirms ICT estimation is feasible via M03 (Cox PH + corridor×cause templates) but provides **no training labels for photos**. Citizen cause hints start as weak supervision; verified commander labels become M13 training signal. `citizen_accident_id` linkage field should be populated on verify for ASTraM audit continuity.
+
+---
+
+### M18 — CitizenApp
+
+#### Problem Statement
+
+Commuters need a lightweight interface to report congestion with a photo, see estimated clearance time immediately, and receive pre-notifications for corridors they care about — without replacing ASTraM's full citizen app (fines, violations).
+
+#### Solution
+
+M18 is a mobile-first PWA consuming M17 for report submission and ICT display, M05 for nearby hotspot context, and M04/M05-driven pre-alerts via WebSocket. Hackathon MVP uses responsive web; Phase 1.5 can embed as ASTraM WebView tab.
+
+#### User Stories
+
+1. As a commuter, I need a one-tap camera flow with GPS permission to report a blockage.
+2. As a commuter, I need a map pin showing where the system placed my report and P50/P80 clearance bands in plain language ("~1 hour typical, up to 2.5 hours").
+3. As a commuter, I need to subscribe to my commute corridor (e.g., ORR, Mysore Road) for pre-alerts.
+4. As a commuter, I need a notification when a predicted hotspot or propagation ripple affects my subscribed area.
+5. As a commuter, I need report status updates (`pending` → `verified` / `rejected`).
+6. As a commander, I need citizen volume metrics visible indirectly via M15 (not in M18).
+7. As a governance admin, I need rate limiting (max 3 reports/hour/user_ref) to prevent spam.
+8. As an analyst, I need optional anonymous `user_ref` (device hash) for subscription continuity without PII.
+
+#### Implementation Decisions
+
+**Responsibility boundary:** Commuter UI + subscription management. Not verification (M17/M15), not dispatch.
+
+**Public interface contract:**
+
+- Client calls M17 `POST /citizen/report`, `GET /citizen/report/{id}`, `POST /citizen/subscribe`
+- WebSocket `citizen.alert` — pre-notification payload from M17 fanout
+- `GET /citizen/nearby-hotspots?lat=&lon=` — proxy to M05 for map context (read-only)
+
+**Core algorithms:**
+
+- PWA geolocation API with permission gate; block submit without coords unless EXIF present
+- Plain-language ICT formatter: `P50` → "Typical clearance: ~{hours}"; `P80` → "Worst case: up to {hours}"
+- Subscription picker: top 22 corridors + "use current location H3 cell"
+- Pre-alert toast + optional browser notification (MVP); ASTraM push (Phase 1.5)
+
+**Storage/read models:**
+
+- LocalStorage: `user_ref` (UUID), active subscriptions, last 5 report ids
+- No server session in MVP; `user_ref` header on subscribe
+
+**Dependencies:** M17, M05 (nearby hotspots), M14 (rate limit flags)
+
+**Latency contract:** Report form submit ≤3 s end-to-end on 4G; alert render ≤2 s after WebSocket push
+
+**Degradation behavior:**
+
+- *Tier 1:* Full report + ICT + pre-alerts
+- *Tier 2:* Report without photo; ICT from template; polling instead of WebSocket
+- *Tier 3:* Static hotspot map from last M05 cache; "alerts temporarily unavailable"
+
+**Phase scope:** MVP — responsive PWA. Phase 1.5 — ASTraM deep link + push. Phase 2 — Kannada UI strings.
+
+#### Testing Decisions
+
+- E2E: photo + GPS → ICT bands displayed within 3 s
+- Subscribe ORR → inject M05 hotspot in ORR H3 → alert received
+- Rate limit: 4th report in 1 h → 429 with user message
+- Offline: form queues; syncs on reconnect (Tier 2)
+
+#### Out of Scope
+
+- Commander triage UI (M15)
+- Navigation/routing (link out to maps provider)
+- ASTraM fines and violations modules
+
+#### Further Notes
+
+Implements readme.md commuter vision: photo report + pre-notification. Demo beat: commuter reports pothole on Mysore Road → sees "~45 min typical clearance" → commander verifies on M15 → standard dispatch card.
+
+---
+
 ## 7. Hackathon MVP Cut
 
 ### 7.1 Demo-Ready Modules (Real Logic)
 
-| Module | MVP Deliverable | Demo Script Beat |
-|--------|-----------------|------------------|
-| M01 | ASTraM CSV replay + webhook simulator | "New breakdown on Mysore Road ingested" |
-| M02 | Feature cache with RCI, centrality, bias weights | Show feature JSON in debug panel |
-| M03 | LightGBM closure + Cox PH ICT bands | "72% closure probability, P50=1.2h" |
-| M04 | GCDH ripple map on ORR | Animated 3-hop propagation |
-| M05 | Observed + predicted hotspots on map | Toggle layer in M15 |
-| M06 | Construction planned package in <10 s | 72-hour timeline card |
-| M07 | MILP with forced timeout → greedy | Show GREEDY_FALLBACK provenance |
-| M08 | Atlas lookup for top junction | 3 diversion routes ranked |
-| M09 | Unified action card + approve flow | Commander approves recommendation |
-| M13 | Buffer manifest screenshot + 94% gate | Analyst tab shows 80/20 proof |
-| M14 | Tier badge + shadow mode on | Toggle Tier 2 live in demo |
-| M15 | Full command dashboard | Primary judge UI |
-| M16 | Field packet on mobile viewport | Officer closes event with barricade count |
+
+| Module | MVP Deliverable                                  | Demo Script Beat                                |
+| ------ | ------------------------------------------------ | ----------------------------------------------- |
+| M01    | ASTraM CSV replay + webhook simulator            | "New breakdown on Mysore Road ingested"         |
+| M02    | Feature cache with RCI, centrality, bias weights | Show feature JSON in debug panel                |
+| M03    | LightGBM closure + Cox PH ICT bands              | "72% closure probability, P50=1.2h"             |
+| M04    | GCDH ripple map on ORR                           | Animated 3-hop propagation                      |
+| M05    | Observed + predicted hotspots on map             | Toggle layer in M15                             |
+| M06    | Construction planned package in <10 s            | 72-hour timeline card                           |
+| M07    | MILP with forced timeout → greedy                | Show GREEDY_FALLBACK provenance                 |
+| M08    | Atlas lookup for top junction                    | 3 diversion routes ranked                       |
+| M09    | Unified action card + approve flow               | Commander approves recommendation               |
+| M13    | Buffer manifest screenshot + 94% gate            | Analyst tab shows 80/20 proof                   |
+| M14    | Tier badge + shadow mode on                      | Toggle Tier 2 live in demo                      |
+| M15    | Full command dashboard                           | Primary judge UI                                |
+| M16    | Field packet on mobile viewport                  | Officer closes event with barricade count       |
+| M17    | Citizen report API + ICT quote                   | Backend for photo/GPS ingest                    |
+| M18    | Citizen PWA report + pre-alert                   | Commuter submits photo; sees clearance estimate |
+
 
 ### 7.2 Stubbed Modules (UI Flow + Mock APIs)
 
-| Module | Stub Behavior | What Judges See |
-|--------|---------------|---------------|
-| M10 | `POST /mock/station/ack` returns 200 + fake unit_id | "Dispatch sent to HAL station" toast + audit log entry |
-| M11 | `POST /mock/vms/receive` logs board text | VMS delivery green checkmark on card |
-| M12 | `GET /mock/transit/demo` returns canned passenger delay index | "~2,400 passengers delayed" advisory banner |
+
+| Module | Stub Behavior                                                 | What Judges See                                        |
+| ------ | ------------------------------------------------------------- | ------------------------------------------------------ |
+| M10    | `POST /mock/station/ack` returns 200 + fake unit_id           | "Dispatch sent to HAL station" toast + audit log entry |
+| M11    | `POST /mock/vms/receive` logs board text                      | VMS delivery green checkmark on card                   |
+| M12    | `GET /mock/transit/demo` returns canned passenger delay index | "~2,400 passengers delayed" advisory banner            |
+
 
 ### 7.3 Minimum Viable Demo Flow (5 Minutes)
 
@@ -1697,20 +1990,25 @@ Closure capture addresses 98.4% missing `assigned_to_police_id` by instrumenting
 3. **Governance:** Show shadow mode on — approve does not call real station API; show mock M10 success.
 4. **Learning:** Open M13 manifest — 80/20 split, 94.2% accuracy, promotion pending anchor check.
 5. **Field:** M16 packet → closure with 4 barricades → feeds M13 label queue.
+6. **Citizen:** M18 photo report on Mysore Road → M17 ICT quote ("~1h typical") → M15 triage badge → commander verifies → M09 card.
 
 ### 7.4 Explicitly Deferred
 
-Production ASTraM credentials, live TomTom, STGCN, real BMTC GTFS-RT, K8s multi-region, cross-city scope.
+Production ASTraM credentials, live TomTom, STGCN, real BMTC GTFS-RT, K8s multi-region, cross-city scope, vision-only geolocation without GPS.
 
 ### 7.5 MVP Success Criteria
 
-| KPI | Target |
-|-----|--------|
-| Card skeleton | ≤350 ms |
-| Dispatch provenance | 100% MILP\|GREEDY_FALLBACK |
-| MILP cutoff | 1.5 s hard |
-| Replay policy | 80/20 visible |
-| Shadow safety | Mock actuation only |
+
+| KPI                           | Target                    |
+| ----------------------------- | ------------------------- |
+| Card skeleton                 | ≤350 ms                   |
+| Dispatch provenance           | 100% MILP|GREEDY_FALLBACK |
+| MILP cutoff                   | 1.5 s hard                |
+| Replay policy                 | 80/20 visible             |
+| Shadow safety                 | Mock actuation only       |
+| Citizen report ACK + ICT      | ≤2 s                      |
+| Unverified citizen → dispatch | 0 (blocked)               |
+
 
 ---
 
@@ -1718,7 +2016,7 @@ Production ASTraM credentials, live TomTom, STGCN, real BMTC GTFS-RT, K8s multi-
 
 ### 8.1 Post-Hackathon Phase 1.5 (Weeks 1–4)
 
-Week 1: M01 production ASTraM webhook. Week 2: M10 station APIs. Week 3: M11 VMS production. Week 4: M14 shadow evaluation + promotion. Exit: 99% execution audit; shadow agreement >85%.
+Week 1: M01 production ASTraM webhook. Week 2: M10 station APIs + M17 ASTraM `citizen_accident_id` linkage. Week 3: M11 VMS production + M18 ASTraM push bridge. Week 4: M14 shadow evaluation + promotion. Exit: 99% execution audit; shadow agreement >85%.
 
 ### 8.2 Phase 2 (Months 2–3)
 
@@ -1730,13 +2028,15 @@ Gate: ≥95% telemetry coverage 90 days → STGCN shadow parallel to GCDH 30 day
 
 ### 8.4 Continuous Iteration Cadence
 
-| Cadence | Activity |
-|---------|----------|
-| Real-time | Ingest, score, dispatch, dashboard |
-| Daily | Rolling priors, hotspot recompute |
-| Weekly | Replay retrain, diversion atlas refresh |
-| Nightly | Cascade stress drill |
-| Quarterly | OSM graph + anchor pool refresh |
+
+| Cadence   | Activity                                |
+| --------- | --------------------------------------- |
+| Real-time | Ingest, score, dispatch, dashboard      |
+| Daily     | Rolling priors, hotspot recompute       |
+| Weekly    | Replay retrain, diversion atlas refresh |
+| Nightly   | Cascade stress drill                    |
+| Quarterly | OSM graph + anchor pool refresh         |
+
 
 ### 8.5 Technical Debt Register (Accepted for MVP)
 
@@ -1756,14 +2056,18 @@ M02←M01 schema; M03←M02 features; M04←M03 RCI seed; M07←M04 CascadeRisk;
 
 ### 9.3 Cascade Integration Test Scenarios
 
-| ID | Injection | Expected | Modules |
-|----|-----------|----------|---------|
-| CAS-01 | 5 concurrent ORR closures | All assigned <1.8 s; no starvation | M07, M09 |
-| CAS-02 | MILP forced >1.5 s | GREEDY_FALLBACK; late MILP ignored | M07, M09 |
-| CAS-03 | M03 outage | Tier 2; rule priors; dispatch continues | M14, M03, M07 |
-| CAS-04 | M01 ingest down | Tier 3; SOP templates | M14, M01, M09 |
-| CAS-05 | Shadow approve | Zero M10/M11 calls | M09, M10, M14 |
-| CAS-07 | Field closure form | Labels in next M13 buffer | M16, M13 |
+
+| ID     | Injection                 | Expected                                | Modules       |
+| ------ | ------------------------- | --------------------------------------- | ------------- |
+| CAS-01 | 5 concurrent ORR closures | All assigned <1.8 s; no starvation      | M07, M09      |
+| CAS-02 | MILP forced >1.5 s        | GREEDY_FALLBACK; late MILP ignored      | M07, M09      |
+| CAS-03 | M03 outage                | Tier 2; rule priors; dispatch continues | M14, M03, M07 |
+| CAS-04 | M01 ingest down           | Tier 3; SOP templates                   | M14, M01, M09 |
+| CAS-05 | Shadow approve            | Zero M10/M11 calls                      | M09, M10, M14 |
+| CAS-07 | Field closure form        | Labels in next M13 buffer               | M16, M13      |
+| CAS-08 | Citizen report unverified | No M07 dispatch; M15 triage only        | M17, M01, M07 |
+| CAS-09 | Citizen verify            | M09 card + optional dispatch            | M17, M09      |
+
 
 ### 9.4 Latency Verification Suite
 
@@ -1779,40 +2083,43 @@ Nightly: M03 kill, MILP timeout 100%, CAS-01. Weekly: Redis flush, station API 5
 
 ### 9.8 Pre-Demo QA Checklist (Hackathon)
 
-- [ ] M01 replays ≥10 events; M03 SHAP on demo event; M04 ORR ripple on map
-- [ ] M07 greedy determinism + MILP timeout demo; M08 atlas 3 routes
-- [ ] M09 partial card <350 ms; M10/M11 mocks on approve; M13 80/20 manifest
-- [ ] M14 tier toggle; M15 WebSocket; M16 closure sync; shadow blocks execution
-- [ ] End-to-end 5-minute demo script rehearsed
+- M01 replays ≥10 events; M03 SHAP on demo event; M04 ORR ripple on map
+- M07 greedy determinism + MILP timeout demo; M08 atlas 3 routes
+- M09 partial card <350 ms; M10/M11 mocks on approve; M13 80/20 manifest
+- M14 tier toggle; M15 WebSocket; M16 closure sync; shadow blocks execution
+- End-to-end 5-minute demo script rehearsed
 
 ### 9.9 Ownership RACI (MVP)
 
-| Activity | Responsible | Accountable |
-|----------|-------------|-------------|
-| Ingest contracts | M01 | Tech lead |
-| Model accuracy gate | M13 | ML lead |
-| Dispatch determinism | M07 | Tech lead |
-| Shadow promotion | M14 | BTP sponsor |
-| Demo UI | M15 | Product |
-| Cascade drills | M14 | Tech lead |
+
+| Activity             | Responsible | Accountable |
+| -------------------- | ----------- | ----------- |
+| Ingest contracts     | M01         | Tech lead   |
+| Model accuracy gate  | M13         | ML lead     |
+| Dispatch determinism | M07         | Tech lead   |
+| Shadow promotion     | M14         | BTP sponsor |
+| Demo UI              | M15         | Product     |
+| Cascade drills       | M14         | Tech lead   |
+
 
 ---
 
 ## Appendix A: Glossary
 
-| Term | Definition |
-|------|------------|
-| ASTraM | Actionable Intelligence for Sustainable Traffic Management — BTP operational platform |
-| RCI | Road Congestion Impact index — composite severity from closure, ICT, centrality, simultaneity |
-| ICT | Incident Clearance Time — start to closed duration |
-| GCDH | Graph-Centrality Decay Heuristic — Phase 1/2 propagation |
-| MILP | Mixed-Integer Linear Program — primary dispatch optimizer |
-| GREEDY_FALLBACK | O(n log n) deterministic dispatch when MILP fails/times out |
-| Shadow mode | Parallel AI recommendations without automated actuation |
-| Anchor set | 20% stratified historical replay buffer sample |
-| Tier 1/2/3 | Full / Constrained / Continuity degradation |
+
+| Term            | Definition                                                                                    |
+| --------------- | --------------------------------------------------------------------------------------------- |
+| ASTraM          | Actionable Intelligence for Sustainable Traffic Management — BTP operational platform         |
+| RCI             | Road Congestion Impact index — composite severity from closure, ICT, centrality, simultaneity |
+| ICT             | Incident Clearance Time — start to closed duration                                            |
+| GCDH            | Graph-Centrality Decay Heuristic — Phase 1/2 propagation                                      |
+| MILP            | Mixed-Integer Linear Program — primary dispatch optimizer                                     |
+| GREEDY_FALLBACK | O(n log n) deterministic dispatch when MILP fails/times out                                   |
+| Shadow mode     | Parallel AI recommendations without automated actuation                                       |
+| Anchor set      | 20% stratified historical replay buffer sample                                                |
+| Tier 1/2/3      | Full / Constrained / Continuity degradation                                                   |
+
 
 ---
 
 *End of Grid Unlocked Implementation Modules Document v1.0*
-

@@ -5,7 +5,7 @@
 **Prepared For:** Hackathon Submission — Senior Engineering Panel & Traffic Authority Leadership  
 **Author:** Ashwary Gupta (Roll No: 23115017)  
 **Date:** June 2026  
-**Version:** 3.0  
+**Version:** 3.1  
 
 ---
 
@@ -56,6 +56,8 @@ Grid Unlocked v3.0 is a prescriptive, human-supervised traffic decision system w
 | Dashboard live update | <= 5 s | WebSocket delta push |
 | Planned event package generation | <= 10 s | Pre-indexed template and corridor graph |
 | Post-approval agentic execution handoff | <= 200 ms | Fire-and-forget command queue with audit log |
+| Citizen report ACK with location snap + ICT quote | <= 2 s P95 | M17 geocode + M03 template lookup |
+| Citizen pre-alert fanout (subscribed corridors) | <= 10 s | M05/M04 delta push to M18 |
 
 ### Non-Blocking Dispatch Pipeline (Required Behavior)
 
@@ -67,11 +69,95 @@ Dispatch is guaranteed non-blocking:
 4. Return recommendation immediately with provenance: `source = MILP | GREEDY_FALLBACK`.
 5. Never hold commander UI for solver completion beyond contract.
 
-Fallback objective is proximity weighted by severity centrality:
+#### Greedy Fallback Score (Mathematical Definition)
 
-`score(unit, incident) = alpha * ETA(unit, incident) + beta * RCI(incident) + gamma * CorridorCentrality(incident) + delta * CascadeRisk(incident)`
+When MILP times out or is infeasible, unit–incident pairs are ranked by a weighted linear score. **Lower score = better match.**
 
-Units are ranked via heap/partial sort (O(n log n)). Tie-breakers are deterministic: station ID, unit ID.
+**Main formula** — for each unit `u` and incident `i`:
+
+```
+S(u, i) = α · ETA(u, i) + β · RCI(i) + γ · C(i) + δ · R_cascade(i)
+```
+
+Expanded (same equation, all terms written out):
+
+```
+S(u, i) = α · ETA(u, i)
+        + β · RCI(i)
+        + γ · CorridorCentrality(i)
+        + δ · CascadeRisk(i)
+```
+
+Implementation notation:
+
+```
+score(unit, incident) = alpha * ETA(unit, incident)
+                      + beta  * RCI(incident)
+                      + gamma * CorridorCentrality(incident)
+                      + delta * CascadeRisk(incident)
+```
+
+**Symbol definitions:**
+
+| Symbol | Name | Meaning |
+|---|---|---|
+| `S(u, i)` | Score | Combined priority for assigning unit `u` to incident `i` |
+| `ETA(u, i)` | ETA | Estimated travel time from unit `u` to incident `i` |
+| `RCI(i)` | Road Congestion Index | Severity / congestion level of incident `i` |
+| `C(i)` | Corridor centrality | Graph centrality of the corridor where incident `i` occurs (higher = more network impact) |
+| `R_cascade(i)` | Cascade risk | Propagation risk from GCDH — likelihood the incident spreads to neighboring corridors |
+| `α, β, γ, δ` | Weights | Tunable coefficients controlling relative importance of each factor |
+
+**Plain-language decomposition:**
+
+```
+Score = (α × distance)           ← proximity: closer unit is better
+      + (β × severity)           ← RCI: worse incidents rank higher
+      + (γ × corridor importance)← centrality: backbone corridors rank higher
+      + (δ × spread risk)        ← cascade: spillover-prone incidents rank higher
+```
+
+The fallback does **not** pick only the nearest unit. It balances proximity (ETA), incident severity (RCI), corridor network importance (centrality), and ripple/spillover risk (cascade).
+
+**Ranking and tie-breaking:**
+
+Units are ranked via heap/partial sort in `O(n log n)`. Tie-breakers are deterministic and stable across repeated runs:
+
+```
+u₁ is ranked before u₂  when ANY of these is true:
+
+  1) S(u₁, i) < S(u₂, i)
+  2) S(u₁, i) = S(u₂, i)  AND  station_id(u₁) < station_id(u₂)
+  3) same station           AND  unit_id(u₁) < unit_id(u₂)
+```
+
+**Illustrative example** (weights α = 1.0, β = 0.5, γ = 0.3, δ = 0.4; shared incident terms RCI = 0.9, centrality = 0.7, cascade = 0.6):
+
+```
+Unit A:  S = 1.0×8 + 0.5×0.9 + 0.3×0.7 + 0.4×0.6
+         S = 8.00 + 0.45 + 0.21 + 0.24 = 8.90
+
+Unit B:  S = 1.0×5 + 0.5×0.9 + 0.3×0.7 + 0.4×0.6
+         S = 5.00 + 0.45 + 0.21 + 0.24 = 5.90   ← better (lower score)
+```
+
+| Unit | ETA (min) | RCI | Centrality | Cascade | Score |
+|---|---:|---:|---:|---:|---:|
+| Unit A | 8 | 0.9 | 0.7 | 0.6 | 8.90 |
+| Unit B | 5 | 0.9 | 0.7 | 0.6 | **5.90** ← better |
+
+Unit B is ranked first: same incident severity and network factors, but lower travel time.
+
+**Pipeline placement:**
+
+```mermaid
+flowchart LR
+    MILP[MILP solver ≤ 1.5s] -->|success| Rec[Recommendation]
+    MILP -->|timeout / fail| Greedy[Greedy fallback]
+    Greedy --> Score["S(u,i) formula"]
+    Score --> Rank[Sort O n log n]
+    Rank --> Rec
+```
 
 ### Propagation Policy (Phase-Correct)
 
@@ -147,13 +233,20 @@ Expected outcome: stable fallback dispatch and bounded latency under stress.
    - Estimates delayed passenger count and transfer overload risk.
    - Outputs micro-transit impact index for command briefings.
 
-### Architecture Flow (v3.0)
+4. **Citizen congestion reporting and pre-notification (v3.1)**
+   - Commuters submit a photo plus device GPS (EXIF GPS as fallback) to report blockages, accidents, and water logging.
+   - M17 snaps the report to corridor/junction via H3 and returns **ICT P50/P80 clearance bands** from M03 historical templates before authorities authenticate.
+   - Commanders triage citizen reports on M15 with a distinct `source=CITIZEN` badge; verified reports merge into the standard M09 action-card flow.
+   - M18 lets users subscribe to corridors/routes and receive **pre-alerts** when M05 predicted hotspots or M04 propagation ripples affect saved areas (MVP: in-app; Phase 1.5: ASTraM push bridge).
+
+### Architecture Flow (v3.1)
 
 ```mermaid
 flowchart LR
     A[ASTraM Events] --> B[Ingestion & Feature Store]
     C[Planned Event Portal] --> B
     D[Field Reports] --> B
+    CR[Citizen Photo Reports M17] --> B
 
     B --> E[Impact Engine]
     E --> F[GCDH Propagation]
@@ -173,6 +266,10 @@ flowchart LR
     P[Outcome Capture] --> Q[Replay Buffer Builder 80-20]
     Q --> R[Model Registry + Shadow Eval]
     R --> E
+
+    CR --> E
+    E --> CA[Citizen ETA Response M18]
+    M05[Hotspot Service] --> CA
 ```
 
 ---
@@ -215,6 +312,18 @@ Stories are structured across **planned**, **unplanned**, **resource**, and **po
 21. **[Degradation]** As an admin, I need automatic tier transition logs and manual override controls for incident command continuity.
 22. **[Integration]** As an admin, I need ASTraM ingestion health, station API health, and VMS webhook delivery health in one dashboard.
 
+### Citizen / Commuter (v3.1)
+
+23. **[Unplanned]** As a commuter, I need to photograph a blockage and submit it with my location so authorities see the problem before I leave the scene.
+24. **[Unplanned]** As a commuter, I need an estimated clearance time (P50/P80 bands) based on similar past incidents so I can decide whether to wait or reroute.
+25. **[Planned + Unplanned]** As a commuter, I need pre-alerts when a subscribed corridor or saved route is likely to congest so I can leave earlier or avoid the area.
+26. **[Unplanned]** As a commuter, I need confirmation that my report was received with a map pin showing the inferred spot.
+
+### Traffic Commander — Citizen Reports (v3.1)
+
+27. **[Unplanned]** As a commander, I need citizen-reported incidents flagged separately from ASTraM/BOT events until authenticated so I can prioritize verification.
+28. **[Unplanned]** As a commander, I need the citizen photo, snapped corridor/junction, and M03 ICT bands on the triage card before dispatch.
+
 ---
 
 ## Implementation Decisions
@@ -242,6 +351,8 @@ Grid Unlocked remains an additive intelligence plane around ASTraM:
 | Transit Impact Service | BMTC delay/passenger estimations | Advisory outputs |
 | Replay Learning Service | 80/20 buffer build + retraining | Anti-overfitting controls |
 | Governance Console | shadow mode, tier control, promotion gates | RBAC and audit log |
+| Citizen Report Service | photo ingest, GPS/EXIF geocode, cause hints, ICT quote | Forwards triage events to M01 |
+| Citizen App | report UI, ETA display, corridor subscriptions, pre-alerts | Consumes M17, M05, M04 |
 
 ### Dispatch Optimization Decision Policy
 
@@ -330,6 +441,8 @@ Testing in v3.0 is contract-first and operations-realistic.
 
 ### 6) Feature Integration Tests (New Capabilities)
 
+- Citizen report: photo + GPS -> M17 location snap -> M03 ICT bands returned -> M01 `source=citizen` event -> M15 triage badge.
+- Citizen pre-alert: M05 predicted hotspot enters subscribed H3 cell -> M18 notification within SLA.
 - Agentic dispatch: approval -> station API call chain -> acknowledgement persisted.
 - Barricade reservation: reservation id returned and linked to deployment.
 - VMS routing: diversion approval -> webhook fanout -> delivery confirmation/retry.
@@ -345,15 +458,16 @@ Testing in v3.0 is contract-first and operations-realistic.
 
 ## Out of Scope
 
-The following remain intentionally excluded in v3.0:
+The following remain intentionally excluded in v3.1:
 
 1. City-wide autonomous signal control.
-2. Full citizen-facing traffic app.
-3. Production STGCN in Phase 1/2.
-4. Cross-city model generalization outside Bengaluru.
-5. Policy/compliance programs unrelated to dispatch intelligence core.
+2. Production STGCN in Phase 1/2.
+3. Cross-city model generalization outside Bengaluru.
+4. Policy/compliance programs unrelated to dispatch intelligence core.
+5. Vision-only geolocation without device GPS (landmark CNN deferred to Phase 2; MVP requires GPS or EXIF).
+6. Automated dispatch from unauthenticated citizen reports (human verification mandatory).
 
-These exclusions preserve KISS/YAGNI and focus delivery on reliable command-center outcomes.
+Citizen reporting (M17/M18) is **in scope** as a lightweight commuter layer complementing ASTraM's existing citizen app; Grid Unlocked does not replace ASTraM fines/violations workflows.
 
 ---
 
@@ -377,7 +491,9 @@ Grid Unlocked is an additive intelligence and orchestration layer:
 | Replay policy compliance | 100% (80/20 enforced) |
 | Classification target accuracy | 94% on approved slice |
 | Shadow mode promotion defects | 0 critical |
+| Citizen report ACK with ICT quote P95 | <= 2 s |
+| Citizen report verification before dispatch | 100% |
 
-### v3.0 Closing Statement
+### v3.1 Closing Statement
 
-Version 3.0 converts Grid Unlocked from a prediction-centric system into a **runtime-governed, non-blocking, command-safe operations platform**. It upgrades dispatch reliability, controls model risk, and introduces approval-gated agentic execution while preserving ASTraM as the operational foundation.
+Version 3.1 extends the runtime-governed operations platform with a **citizen reporting and pre-notification layer**: commuters contribute ground-truth via photo + GPS, receive historical ICT estimates immediately, and subscribe to corridor pre-alerts — while commanders retain verification control before citizen reports enter dispatch.
