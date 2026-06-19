@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from grid_unlocked.features.service import FeatureService
 from grid_unlocked.impact.registry import registry
 from grid_unlocked.planned.analogs import find_analog_events
-from grid_unlocked.planned.diversion_stub import diversion_refs_for_corridor
+from grid_unlocked.diversions.service import DiversionService
 from grid_unlocked.planned.repository import PlannedRepository, attributes_hash
 from grid_unlocked.planned.rules import (
     apply_vip_barricade_floor,
@@ -91,7 +91,7 @@ class PlannedService:
             deployment_lead_time_hours=template.deployment_lead_time_hours,
             checklist=template.checklist,
             analog_events=find_analog_events(event.event_cause, event.corridor),
-            diversion_refs=diversion_refs_for_corridor(event.corridor),
+            diversion_refs=DiversionService.refs_for_corridor(event.corridor),
             impact_overlay=overlay,
             compliance_items=[
                 "BTP permit reference verified",

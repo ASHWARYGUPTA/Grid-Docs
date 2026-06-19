@@ -1,4 +1,4 @@
-"""Cross-module integration tests — M01 through M07 end-to-end wiring."""
+"""Cross-module integration tests — M01 through M09 end-to-end wiring."""
 
 from __future__ import annotations
 
@@ -81,8 +81,8 @@ async def _wait_features(client: AsyncClient, event_id: str, retries: int = 5) -
 
 
 @pytest.mark.asyncio
-async def test_full_pipeline_m01_through_m07(wired_client):
-    """M01→M02→M03→M04→M05→M07 on a single unplanned heavy-vehicle incident."""
+async def test_full_pipeline_m01_through_m08(wired_client):
+    """M01→M02→M03→M04→M05→M07→M08→M09 on a single unplanned heavy-vehicle incident."""
     ingest = await wired_client.post("/ingest/astram", json=E2E_EVENT)
     assert ingest.status_code == 200
     assert ingest.json()["normalized"] is True
@@ -153,6 +153,111 @@ async def test_full_pipeline_m01_through_m07(wired_client):
 
     status = await wired_client.get(f"/dispatch/status/{disp['recommendation_id']}")
     assert status.json()["complete"] is True
+
+    atlas = await wired_client.get("/diversions/atlas/junction:ORR-Sarjapur")
+    assert atlas.status_code == 200
+    atlas_body = atlas.json()
+    assert atlas_body["latency_ms"] < 80
+    assert len(atlas_body["routes"]) >= 1
+    closed = atlas_body["closed_node_id"]
+    for route in atlas_body["routes"]:
+        assert closed not in route["path"]
+
+    scenarios = await wired_client.get("/diversions/scenarios/FKIDE2E0001")
+    assert scenarios.status_code == 200
+    scen = scenarios.json()
+    assert scen["corridor"] == "ORR East 1"
+    assert scen["p_closure"] == score["p_closure"]
+    assert len(scen["routes"]) == 3
+    assert scen["junction_id"] == "junction:ORR-Sarjapur"
+
+    validate = await wired_client.post(
+        "/diversions/validate",
+        json={"path": scen["routes"][0]["path"], "closed_node_id": closed},
+    )
+    assert validate.status_code == 200
+    assert validate.json()["valid"] is True
+
+    card = await wired_client.get("/recommendations/FKIDE2E0001?mode=complete&refresh=true")
+    assert card.status_code == 200
+    action = card.json()
+    assert action["card_id"].startswith("CARD-")
+    assert action["status"] == "complete"
+    assert action["impact"]["rci"] == score["rci"]
+    assert action["propagation"]["cascade_risk"] == prop["cascade_risk"]
+    assert len(action["diversions"]) == 3
+    assert action["dispatch"]["provenance"] in {"MILP", "GREEDY_FALLBACK"}
+    assert action["evidence"]["top_features"]
+    assert action["governance"]["shadow_mode"] is True
+    assert action["latency_ms"] < settings.recommendation_complete_sla_ms + 500
+
+    queue = await wired_client.get("/recommendations/queue")
+    assert any(i["event_id"] == "FKIDE2E0001" for i in queue.json()["items"])
+
+
+@pytest.mark.asyncio
+async def test_m08_m06_planned_package_diversion_wiring(wired_client):
+    """M06 planned package diversion_refs sourced from M08 atlas (not static stub)."""
+    ingest = await wired_client.post("/ingest/planned", json=PLANNED_CONSTRUCTION)
+    assert ingest.status_code == 200
+    await _wait_features(wired_client, "FKIDE2EPLAN1")
+
+    atlas = (await wired_client.get("/diversions/atlas/junction:Mysore-NICE")).json()
+    package = (
+        await wired_client.post("/planned/package", json={"event_id": "FKIDE2EPLAN1"})
+    ).json()
+
+    assert len(package["diversion_refs"]) == 3
+    atlas_junctions = {r["junction_id"] for r in atlas["routes"]}
+    package_junctions = {r["junction_id"] for r in package["diversion_refs"]}
+    assert package_junctions.issubset(set(atlas_junctions) | {"junction:Mysore-Vijayanagar", "junction:Mysore-Gnanabharathi"})
+    for ref in package["diversion_refs"]:
+        assert ref["description"]
+        assert ref["route_summary"]
+        assert 1 <= ref["rank"] <= 3
+
+
+@pytest.mark.asyncio
+async def test_m08_compute_fills_cache_miss(wired_client):
+    """POST /diversions/compute returns uncached on-demand routes."""
+    resp = await wired_client.post(
+        "/diversions/compute",
+        json={"junction_id": "junction:Hebbal-flyover", "k": 3},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["cached"] is False
+    assert body["source_corridor"] == "Bellary Road 1"
+    assert len(body["routes"]) >= 1
+    ranks = [r["rank"] for r in body["routes"]]
+    assert ranks == sorted(ranks)
+
+
+@pytest.mark.asyncio
+async def test_m08_scenarios_auto_suggest_peak_vs_off_peak(wired_client):
+    """Activation policy: auto_suggest requires p_closure > threshold AND peak hour."""
+    peak_event = {
+        **E2E_EVENT,
+        "id": "FKIDE2EPEAK1",
+        "start_datetime": "2024-03-07T12:00:00+00:00",  # 17:30 IST — peak
+    }
+    offpeak_event = {
+        **E2E_EVENT,
+        "id": "FKIDE2EOFF1",
+        "start_datetime": "2024-03-07T06:30:00+00:00",  # 12:00 IST — off peak
+    }
+    await wired_client.post("/ingest/astram", json=peak_event)
+    await wired_client.post("/ingest/astram", json=offpeak_event)
+    await asyncio.sleep(0.35)
+
+    peak_scen = (await wired_client.get("/diversions/scenarios/FKIDE2EPEAK1")).json()
+    off_scen = (await wired_client.get("/diversions/scenarios/FKIDE2EOFF1")).json()
+
+    assert peak_scen["is_peak_hour"] is True
+    if peak_scen["p_closure"] > settings.closure_alert_threshold:
+        assert peak_scen["auto_suggest"] is True
+    # off-peak must not auto-suggest regardless of closure probability
+    assert off_scen["auto_suggest"] is False
 
 
 @pytest.mark.asyncio
@@ -314,6 +419,50 @@ async def test_m07_milp_or_greedy_with_astram_shadow(wired_client):
 
     roster = await wired_client.get("/dispatch/roster")
     assert roster.json()["count"] >= 10
+
+
+@pytest.mark.asyncio
+async def test_m09_planned_event_includes_package_section(wired_client):
+    """M09 complete card for planned events includes M06 package summary."""
+    await wired_client.post("/ingest/planned", json=PLANNED_CONSTRUCTION)
+    await _wait_features(wired_client, "FKIDE2EPLAN1")
+
+    card = (
+        await wired_client.get(
+            "/recommendations/FKIDE2EPLAN1?mode=complete&refresh=true",
+        )
+    ).json()
+    assert card["status"] == "complete"
+    assert card["planned"] is not None
+    assert card["planned"]["barricade_count"] >= 1
+    assert card["planned"]["template_id"]
+
+
+@pytest.mark.asyncio
+async def test_m09_approve_reject_lifecycle(wired_client):
+    """M09 approval workflow persists status and respects shadow mode."""
+    event = {**E2E_EVENT, "id": "FKIDE2E0009"}
+    await wired_client.post("/ingest/astram", json=event)
+    await _wait_features(wired_client, "FKIDE2E0009")
+
+    card = (await wired_client.get("/recommendations/FKIDE2E0009?refresh=true")).json()
+    approve = await wired_client.post(
+        f"/recommendations/{card['card_id']}/approve",
+        json={"commander_id": "CMD-E2E", "override_codes": []},
+    )
+    assert approve.status_code == 200
+    assert approve.json()["execution_enqueued"] is False
+
+    event2 = {**E2E_EVENT, "id": "FKIDE2E0010"}
+    await wired_client.post("/ingest/astram", json=event2)
+    await _wait_features(wired_client, "FKIDE2E0010")
+    card2 = (await wired_client.get("/recommendations/FKIDE2E0010?refresh=true")).json()
+    reject = await wired_client.post(
+        f"/recommendations/{card2['card_id']}/reject",
+        json={"commander_id": "CMD-E2E", "reason_code": "INSUFFICIENT_EVIDENCE", "notes": "test"},
+    )
+    assert reject.status_code == 200
+    assert reject.json()["action"] == "reject"
 
 
 @pytest.mark.asyncio

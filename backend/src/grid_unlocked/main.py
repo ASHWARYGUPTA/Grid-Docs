@@ -46,8 +46,8 @@ async def _check_db(session: AsyncSession) -> bool:
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
-        description="Grid Unlocked API — M01–M07 (Ingestion through Dispatch)",
-        version="0.7.0",
+        description="Grid Unlocked API — M01–M09 (Ingestion through Recommendations)",
+        version="0.9.0",
         lifespan=lifespan,
     )
     app.include_router(router)
@@ -71,6 +71,12 @@ def create_app() -> FastAPI:
     from grid_unlocked.dispatch.router import router as dispatch_router
 
     app.include_router(dispatch_router)
+    from grid_unlocked.diversions.router import router as diversions_router
+
+    app.include_router(diversions_router)
+    from grid_unlocked.recommendations.router import router as recommendations_router
+
+    app.include_router(recommendations_router)
 
     @app.get("/health", tags=["health"])
     async def system_health() -> dict:

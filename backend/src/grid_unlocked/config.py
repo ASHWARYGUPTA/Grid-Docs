@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     dispatch_bias_hours: tuple[int, ...] = (14, 15, 16, 17, 18)
     dispatch_bias_max_multiplier: float = 3.0
 
+    diversion_k_default: int = 3
+    diversion_max_hops: int = 5
+
+    governance_tier: str = "1"
+    governance_shadow_mode: bool = True
+    recommendation_skeleton_sla_ms: int = 350
+    recommendation_complete_sla_ms: int = 1800
+
     @property
     def uses_postgres(self) -> bool:
         return self.database_url.startswith("postgresql")

@@ -4,6 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from grid_unlocked.config import settings
 from grid_unlocked.db.models import (  # noqa: F401 — register all tables with Base.metadata
+    ActionCardRow,
+    ApprovalRecordRow,
     Base,
     CausePriorRow,
     CorridorCausePriorRow,
