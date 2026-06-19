@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Index, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -190,4 +190,103 @@ class ApprovalRecordRow(Base):
     approval_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+# ---------------------------------------------------------------------------
+# M10 — AgenticExecutionBroker tables
+# ---------------------------------------------------------------------------
+
+
+class ExecutionQueueRow(Base):
+    """Mutable state-machine row for a pending / in-flight execution command."""
+
+    __tablename__ = "execution_queue"
+
+    execution_id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    approval_token: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    card_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    event_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    command_type: Mapped[str] = mapped_column(String(32), nullable=False)  # dispatch | barricade
+    status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="pending"
+    )  # pending | processing | acknowledged | failed | retrying | dead_letter
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_execution_queue_status", "status"),
+        # approval_token index auto-created by column-level index=True
+    )
+
+
+class ExecutionAuditRow(Base):
+    """Immutable per-attempt audit record — 7-year retention per spec."""
+
+    __tablename__ = "execution_audit"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    execution_id: Mapped[str] = mapped_column(String(48), nullable=False, index=True)
+    approval_token: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    card_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    event_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    command_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    station_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    request_payload: Mapped[str] = mapped_column(Text, nullable=False)  # JSON
+    response_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    response_body: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    outcome: Mapped[str] = mapped_column(
+        String(24), nullable=False
+    )  # acknowledged | failed | dead_letter
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    executed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        # event_id and card_id indexes auto-created by column-level index=True
+    )
+
+
+# ---------------------------------------------------------------------------
+# M11 — VMSRouter table
+# ---------------------------------------------------------------------------
+
+
+class VmsDeliveryRow(Base):
+    """Per-board delivery state machine row for M11 VMS fanout."""
+
+    __tablename__ = "vms_deliveries"
+
+    delivery_id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    push_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    event_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    card_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    board_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    board_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    board_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="pending"
+    )  # pending | processing | delivered | failed | retrying | dead_letter
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    dead_letter: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ack_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    response_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_vms_deliveries_push_status", "push_id", "status"),
     )

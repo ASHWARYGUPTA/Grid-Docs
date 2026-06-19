@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from grid_unlocked.config import settings
 from grid_unlocked.db.session import SessionLocal, get_session, init_db
+from grid_unlocked.execution.service import setup_command_queue
+from grid_unlocked.execution.queue import get_command_queue
 from grid_unlocked.features.router import router as features_router
 from grid_unlocked.features.service import FeatureService
 from grid_unlocked.features.subscriber import register_feature_subscribers
@@ -31,7 +33,14 @@ async def lifespan(_: FastAPI):
     async with SessionLocal() as session:
         service = FeatureService(session)
         await service.ensure_priors_seeded()
+
+    # M10 — start background command queue worker
+    queue = await setup_command_queue()
+
     yield
+
+    # M10 — graceful shutdown
+    await queue.stop()
     await close_redis()
 
 
@@ -46,8 +55,8 @@ async def _check_db(session: AsyncSession) -> bool:
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
-        description="Grid Unlocked API — M01–M09 (Ingestion through Recommendations)",
-        version="0.9.0",
+        description="Grid Unlocked API — M01–M10 (Ingestion through AgenticExecutionBroker)",
+        version="1.0.0",
         lifespan=lifespan,
     )
     app.include_router(router)
@@ -77,6 +86,10 @@ def create_app() -> FastAPI:
     from grid_unlocked.recommendations.router import router as recommendations_router
 
     app.include_router(recommendations_router)
+    from grid_unlocked.execution.router import mock_router, router as execution_router
+
+    app.include_router(execution_router)
+    app.include_router(mock_router)
 
     @app.get("/health", tags=["health"])
     async def system_health() -> dict:

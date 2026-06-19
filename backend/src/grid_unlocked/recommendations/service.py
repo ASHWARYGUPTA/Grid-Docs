@@ -14,6 +14,8 @@ from grid_unlocked.config import settings
 from grid_unlocked.dispatch.schemas import GovernanceTier, RecommendRequest
 from grid_unlocked.dispatch.service import DispatchService
 from grid_unlocked.diversions.service import DiversionService
+from grid_unlocked.execution.schemas import ExecuteDispatchRequest
+from grid_unlocked.execution.service import ExecutionService as M10ExecutionService
 from grid_unlocked.features.service import FeatureService
 from grid_unlocked.hotspots.service import HotspotService
 from grid_unlocked.impact.service import ImpactService
@@ -282,11 +284,46 @@ class RecommendationService:
         )
         await self.repo.update_status(card_id, CardStatus.APPROVED)
 
-        msg = (
-            "Approval logged in shadow mode — M10/M11 execution blocked"
-            if gov.shadow_mode
-            else "Approval recorded — M10 execution stub pending Phase 1.5"
-        )
+        # Trigger M10 execution when not in shadow mode
+        if execution:
+            try:
+                m10 = M10ExecutionService(self.session)
+                station_id: str | None = None
+                rec_id: str | None = None
+                barricade_count = 0
+
+                # Extract dispatch info from card if available
+                if card.dispatch:
+                    rec_id = card.dispatch.recommendation_id
+                    if card.dispatch.assignments:
+                        station_id = card.dispatch.assignments[0].station_id
+
+                # Extract barricade count from planned section if available
+                if card.planned:
+                    barricade_count = card.planned.barricade_count
+
+                await m10.enqueue_dispatch(
+                    ExecuteDispatchRequest(
+                        approval_token=token,
+                        card_id=card_id,
+                        event_id=card.event_id,
+                        recommendation_id=rec_id,
+                        barricade_count=barricade_count,
+                        station_id=station_id,
+                        commander_id=commander_id,
+                    )
+                )
+                msg = f"Approval recorded — dispatch enqueued (token={token})"
+            except Exception:
+                # Non-fatal: approval is still recorded even if M10 enqueue fails
+                msg = f"Approval recorded — M10 enqueue failed (token={token}); manual dispatch required"
+        else:
+            msg = (
+                "Approval logged in shadow mode — M10/M11 execution blocked"
+                if gov.shadow_mode
+                else f"Approval recorded — execution disabled in Tier {gov.tier}"
+            )
+
         return ApprovalResult(
             card_id=card_id,
             action="approve",
