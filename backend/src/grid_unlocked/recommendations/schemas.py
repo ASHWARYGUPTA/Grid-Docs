@@ -117,6 +117,7 @@ class QueueItem(BaseModel):
     event_id: str
     card_id: str | None
     rci: float
+    p_closure: float
     severity_band: SeverityBand
     alert_priority: AlertPriority
     corridor: str | None

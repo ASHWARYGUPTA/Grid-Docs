@@ -49,6 +49,22 @@ class ModelRegistry:
         self._loaded = False
         self._ml_available = False
 
+    def reload(self, models_dir: Path | None = None) -> None:
+        """M13 — reload artifacts after a promotion. If models_dir is given,
+        repoints the registry at the newly-promoted version's artifact
+        directory (e.g. models/v2) before reloading."""
+        if models_dir is not None:
+            self.models_dir = models_dir
+        self._closure_model = None
+        self._calibrator = None
+        self._cox_model = None
+        self._encoders = {}
+        self._metadata = {}
+        self._feature_importance = {}
+        self._loaded = False
+        self._ml_available = False
+        self.load()
+
     def load(self) -> None:
         if self._loaded:
             return

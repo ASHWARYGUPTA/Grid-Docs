@@ -68,3 +68,7 @@ class MockWebhookClient:
             },
             latency_ms=latency,
         )
+
+    def with_failure_rate(self, rate: float) -> "MockWebhookClient":
+        """Return a new client with specified failure rate (useful in tests)."""
+        return MockWebhookClient(failure_rate=rate)

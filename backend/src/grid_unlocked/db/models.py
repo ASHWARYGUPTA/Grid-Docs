@@ -290,3 +290,124 @@ class VmsDeliveryRow(Base):
     __table_args__ = (
         Index("ix_vms_deliveries_push_status", "push_id", "status"),
     )
+
+
+# ---------------------------------------------------------------------------
+# M14 — GovernanceConsole tables
+# ---------------------------------------------------------------------------
+
+
+class GovernanceStateRow(Base):
+    """Singleton (id=1) — current tier + shadow mode, the durable source of
+    truth backing the in-process cache read by get_governance()."""
+
+    __tablename__ = "governance_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False, default=1)
+    tier: Mapped[str] = mapped_column(String(8), nullable=False, default="1")
+    shadow_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class TierTransitionRow(Base):
+    """Immutable audit log — every tier change, automatic or manual."""
+
+    __tablename__ = "tier_transitions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    from_tier: Mapped[str] = mapped_column(String(8), nullable=False)
+    to_tier: Mapped[str] = mapped_column(String(8), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    operator_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # null = automatic
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_tier_transitions_created_at", "created_at"),
+    )
+
+
+class DrillResultRow(Base):
+    """Nightly synthetic cascade drill outcomes."""
+
+    __tablename__ = "drill_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    drill_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    result_json: Mapped[str] = mapped_column(Text, nullable=False)
+    passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+# ---------------------------------------------------------------------------
+# M13 — ReplayLearningService tables
+# ---------------------------------------------------------------------------
+
+
+class ReplayBufferManifestRow(Base):
+    """80/20 replay buffer composition report for one retrain job."""
+
+    __tablename__ = "replay_buffer_manifests"
+
+    job_id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    recent_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    anchor_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    recent_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    anchor_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    strata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    window_weeks: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="building"
+    )  # building | ready | anchor_only | failed
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ModelRegistryRow(Base):
+    """Staged -> production -> retired lifecycle for trained model artifacts."""
+
+    __tablename__ = "model_registry"
+
+    model_version: Mapped[str] = mapped_column(String(48), primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(48), nullable=False, index=True)
+    closure_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    ict_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    stage: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="staged"
+    )  # staged | production | retired
+    accuracy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    anchor_accuracy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    artifact_dir: Mapped[str] = mapped_column(String(256), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_model_registry_stage", "stage"),
+    )
+
+
+class LearningJobRow(Base):
+    """One retrain job — buffer -> train -> eval -> (promote) lifecycle."""
+
+    __tablename__ = "learning_jobs"
+
+    job_id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    trigger: Mapped[str] = mapped_column(String(16), nullable=False)  # scheduled | drift | manual
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending"
+    )  # pending | running | eval_complete | promoted | failed
+    model_version: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -106,6 +106,7 @@ class ExecutionEnqueueResponse(BaseModel):
     status: ExecutionStatus
     enqueue_ms: float
     message: str
+    barricade_execution_id: str | None = None
 
 
 class RetryResponse(BaseModel):

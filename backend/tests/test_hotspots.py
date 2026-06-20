@@ -74,6 +74,29 @@ async def test_observed_hotspots_endpoint(client):
 
 
 @pytest.mark.asyncio
+async def test_density_hotspots_endpoint(client):
+    response = await client.get("/hotspots/density")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "historical_all_cells"
+    assert isinstance(body["cells"], list)
+    if body["cells"]:
+        cell = body["cells"][0]
+        assert set(cell.keys()) == {"h3_res7", "centroid_lat", "centroid_lon", "count"}
+        assert cell["count"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_density_hotspots_min_count_filter(client):
+    response_all = await client.get("/hotspots/density?min_count=1")
+    response_filtered = await client.get("/hotspots/density?min_count=50")
+    assert response_all.status_code == 200
+    assert response_filtered.status_code == 200
+    assert len(response_filtered.json()["cells"]) <= len(response_all.json()["cells"])
+    assert all(c["count"] >= 50 for c in response_filtered.json()["cells"])
+
+
+@pytest.mark.asyncio
 async def test_predicted_hotspots_endpoint(client):
     response = await client.get("/hotspots/predicted?horizon_hours=4")
     assert response.status_code == 200

@@ -67,6 +67,7 @@ class PoissonForecaster:
                 expected = max(0.0, expected)
 
             lift = ((expected - baseline) / baseline * 100) if baseline > 0 else 0.0
+            centroid = idx.corridor_centroids.get(corridor)
             forecasts.append(
                 PredictedZoneForecast(
                     corridor=corridor,
@@ -74,6 +75,8 @@ class PoissonForecaster:
                     expected_count=round(expected, 2),
                     baseline_count=round(baseline, 2),
                     lift_pct=round(lift, 1),
+                    centroid_lat=round(centroid[0], 6) if centroid else None,
+                    centroid_lon=round(centroid[1], 6) if centroid else None,
                 )
             )
 
@@ -88,8 +91,8 @@ class PoissonForecaster:
                 HotspotCluster(
                     cluster_id=f"pred-{rank}-{fc.corridor.replace(' ', '_')[:20]}",
                     layer=HotspotLayer.PREDICTED,
-                    centroid_lat=12.97,
-                    centroid_lon=77.59 + rank * 0.01,
+                    centroid_lat=fc.centroid_lat if fc.centroid_lat is not None else 12.97,
+                    centroid_lon=fc.centroid_lon if fc.centroid_lon is not None else 77.59,
                     density=density,
                     cause_entropy=0.0,
                     h3_cells=[],

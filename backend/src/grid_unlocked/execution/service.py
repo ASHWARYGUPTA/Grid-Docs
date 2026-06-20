@@ -223,11 +223,12 @@ class ExecutionService:
 
     async def enqueue_dispatch(self, req: ExecuteDispatchRequest) -> ExecutionEnqueueResponse:
         """
-        Main entry point: enqueue a dispatch command post-approval.
+        Main entry point: enqueue a dispatch command (and a barricade reservation
+        command, if requested) post-approval.
 
         1. Shadow gate — block if shadow_mode=True.
         2. Idempotency — return existing record if approval_token already queued.
-        3. Create queue row → enqueue to background worker (fire-and-forget).
+        3. Create queue row(s) → enqueue to background worker (fire-and-forget).
         4. Return response within ≤200 ms P95.
         """
         t0 = time.perf_counter()
@@ -244,10 +245,32 @@ class ExecutionService:
                 detail="M10 execution disabled in Tier 3 continuity mode. Manual dispatch SOP applies.",
             )
 
-        # Idempotency check — D-M10-03 note: with Redis Streams this would be atomic
-        existing = await self.repo.get_queue_row_by_token(
-            req.approval_token, CommandType.DISPATCH
+        dispatch_result = await self._enqueue_command(req, CommandType.DISPATCH)
+
+        barricade_execution_id: str | None = None
+        if req.barricade_count > 0:
+            barricade_result = await self._enqueue_command(req, CommandType.BARRICADE)
+            barricade_execution_id = barricade_result.execution_id
+
+        elapsed = round((time.perf_counter() - t0) * 1000, 2)
+        return ExecutionEnqueueResponse(
+            execution_id=dispatch_result.execution_id,
+            approval_token=req.approval_token,
+            status=dispatch_result.status,
+            enqueue_ms=elapsed,
+            message=dispatch_result.message,
+            barricade_execution_id=barricade_execution_id,
         )
+
+    async def _enqueue_command(
+        self, req: ExecuteDispatchRequest, command_type: CommandType
+    ) -> ExecutionEnqueueResponse:
+        """Enqueue a single command (dispatch or barricade), idempotent on
+        (approval_token, command_type)."""
+        t0 = time.perf_counter()
+
+        # Idempotency check — D-M10-03 note: with Redis Streams this would be atomic
+        existing = await self.repo.get_queue_row_by_token(req.approval_token, command_type)
         if existing:
             elapsed = round((time.perf_counter() - t0) * 1000, 2)
             return ExecutionEnqueueResponse(
@@ -266,7 +289,7 @@ class ExecutionService:
             approval_token=req.approval_token,
             card_id=req.card_id,
             event_id=req.event_id,
-            command_type=CommandType.DISPATCH,
+            command_type=command_type,
         )
 
         cmd = QueuedCommand(
@@ -274,7 +297,7 @@ class ExecutionService:
             approval_token=req.approval_token,
             card_id=req.card_id,
             event_id=req.event_id,
-            command_type=CommandType.DISPATCH,
+            command_type=command_type,
             station_id=req.station_id,
             barricade_count=req.barricade_count,
             recommendation_id=req.recommendation_id,
@@ -286,15 +309,20 @@ class ExecutionService:
 
         elapsed = round((time.perf_counter() - t0) * 1000, 2)
         logger.info(
-            "Enqueued dispatch %s for card %s (%.1f ms)", execution_id, req.card_id, elapsed
+            "Enqueued %s %s for card %s (%.1f ms)",
+            command_type.value,
+            execution_id,
+            req.card_id,
+            elapsed,
         )
 
+        label = "Dispatch" if command_type == CommandType.DISPATCH else "Barricade reservation"
         return ExecutionEnqueueResponse(
             execution_id=execution_id,
             approval_token=req.approval_token,
             status=ExecutionStatus.PENDING,
             enqueue_ms=elapsed,
-            message=f"Dispatch command enqueued — execution_id={execution_id}. Station ACK async.",
+            message=f"{label} command enqueued — execution_id={execution_id}. Station ACK async.",
         )
 
     async def get_status(self, execution_id: str) -> ExecutionStatusResponse:

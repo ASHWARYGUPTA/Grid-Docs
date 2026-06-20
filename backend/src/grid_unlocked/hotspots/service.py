@@ -13,7 +13,9 @@ from grid_unlocked.hotspots.poisson import poisson_forecaster
 from grid_unlocked.hotspots.repository import HotspotRepository
 from grid_unlocked.hotspots.schemas import (
     AnomaliesResponse,
+    CellDensityPoint,
     CellHistorySummary,
+    DensityHotspotsResponse,
     ObservedHotspotsResponse,
     PredictedHotspotsResponse,
 )
@@ -80,6 +82,19 @@ class HotspotService:
         )
         await hotspot_cache.set_predicted(horizon_hours, response)
         return response
+
+    def get_density(self, min_count: int = 1) -> DensityHotspotsResponse:
+        t0 = time.perf_counter()
+        historical_index.load()
+        cells = [
+            CellDensityPoint(h3_res7=cell_id, centroid_lat=lat, centroid_lon=lon, count=count)
+            for cell_id, lat, lon, count in historical_index.all_cell_densities(min_count=min_count)
+        ]
+        return DensityHotspotsResponse(
+            cells=cells,
+            refreshed_at=datetime.now(UTC).isoformat(),
+            latency_ms=round((time.perf_counter() - t0) * 1000, 2),
+        )
 
     def get_anomalies(self, window_hours: int = 24) -> AnomaliesResponse:
         return AnomaliesResponse(

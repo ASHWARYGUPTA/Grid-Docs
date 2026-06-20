@@ -4,6 +4,7 @@ from sqlalchemy.pool import StaticPool
 from grid_unlocked.config import settings
 from grid_unlocked.db.session import init_db
 from grid_unlocked.features.priors_loader import priors_need_seed, seed_priors_from_csv
+from grid_unlocked.governance.service import reset_cache_for_tests
 
 
 @pytest.fixture(autouse=True)
@@ -25,5 +26,11 @@ async def test_db(monkeypatch):
     async with session_module.SessionLocal() as session:
         if await priors_need_seed(session):
             await seed_priors_from_csv(session)
+    # M14 — start each test proxying live settings (pre-bootstrap state), so
+    # existing monkeypatch.setattr(settings, "governance_*", ...) calls keep
+    # working unchanged; tests that exercise GovernanceService explicitly
+    # bootstrap/override and thereby switch the cache to DB-backed.
+    reset_cache_for_tests()
     yield
+    reset_cache_for_tests()
     await session_module.engine.dispose()

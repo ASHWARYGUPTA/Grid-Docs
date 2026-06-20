@@ -60,6 +60,18 @@ class Settings(BaseSettings):
     recommendation_skeleton_sla_ms: int = 350
     recommendation_complete_sla_ms: int = 1800
 
+    learning_recent_window_weeks: int = 4
+    learning_anchor_min_records: int = 1500
+    learning_accuracy_gate: float = 0.94
+    learning_anchor_epsilon: float = 0.02
+    learning_buffer_tolerance_pct: float = 0.5
+
+    # M15 — CommandDashboard frontend origins allowed to call the API + WS.
+    cors_allow_origins: tuple[str, ...] = (
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    )
+
     @property
     def uses_postgres(self) -> bool:
         return self.database_url.startswith("postgresql")

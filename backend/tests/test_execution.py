@@ -390,3 +390,140 @@ async def test_mock_station_ack_endpoint(client):
 async def test_status_404_unknown_execution(client):
     resp = await client.get("/execute/status/EXEC-NONEXISTENT")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 10. Barricade reservation is enqueued and executed alongside dispatch
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_barricade_count_enqueues_separate_command(monkeypatch, client):
+    """When barricade_count > 0, /execute/dispatch must enqueue BOTH a dispatch
+    command and a distinct barricade command, each independently acknowledged
+    and audited (this was previously dead code — barricade_count was accepted
+    but never turned into a queued command)."""
+    monkeypatch.setattr(settings, "governance_shadow_mode", False)
+    monkeypatch.setattr(settings, "governance_tier", "1")
+
+    await _fresh_queue(MockStationClient(failure_rate=0.0))
+
+    event_id = "EVT-BAR001"
+    resp = await client.post(
+        "/execute/dispatch",
+        json={
+            "approval_token": "APPR-BAR-001",
+            "card_id": "CARD-BAR0001",
+            "event_id": event_id,
+            "barricade_count": 3,
+            "station_id": "HAL",
+            "commander_id": "CMD-001",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    dispatch_id = body["execution_id"]
+    barricade_id = body["barricade_execution_id"]
+    assert barricade_id is not None
+    assert barricade_id != dispatch_id
+
+    await asyncio.sleep(0.5)
+
+    dispatch_status = (await client.get(f"/execute/status/{dispatch_id}")).json()
+    barricade_status = (await client.get(f"/execute/status/{barricade_id}")).json()
+    assert dispatch_status["status"] == ExecutionStatus.ACKNOWLEDGED
+    assert barricade_status["status"] == ExecutionStatus.ACKNOWLEDGED
+
+    audit = (await client.get(f"/execute/audit?event_id={event_id}")).json()["entries"]
+    command_types = {e["command_type"] for e in audit}
+    assert command_types == {"dispatch", "barricade"}
+    barricade_entry = next(e for e in audit if e["command_type"] == "barricade")
+    assert barricade_entry["response_code"] == 200
+    assert barricade_entry["outcome"] == "acknowledged"
+
+
+@pytest.mark.asyncio
+async def test_barricade_count_zero_no_barricade_command(monkeypatch, client):
+    """barricade_count=0 (default) must NOT enqueue a barricade command."""
+    monkeypatch.setattr(settings, "governance_shadow_mode", False)
+    monkeypatch.setattr(settings, "governance_tier", "1")
+
+    await _fresh_queue(MockStationClient(failure_rate=0.0))
+
+    resp = await client.post(
+        "/execute/dispatch",
+        json={
+            "approval_token": "APPR-NOBAR-001",
+            "card_id": "CARD-NOBAR001",
+            "event_id": "EVT-NOBAR001",
+            "commander_id": "CMD-001",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["barricade_execution_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# 11. Manual retry after dead-letter succeeds
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_manual_retry_after_dead_letter_succeeds(monkeypatch, client):
+    """After DLQ, POST /execute/retry/{id} with a healthy client must bring the
+    execution to acknowledged."""
+    monkeypatch.setattr(settings, "governance_shadow_mode", False)
+    monkeypatch.setattr(settings, "governance_tier", "1")
+    import grid_unlocked.execution.service as svc_module
+    monkeypatch.setattr(svc_module, "_RETRY_DELAYS", [0.01, 0.01, 0.01])
+
+    await _fresh_queue(MockStationClient(failure_rate=1.0))
+
+    resp = await client.post(
+        "/execute/dispatch",
+        json={
+            "approval_token": "APPR-DLQRETRY-001",
+            "card_id": "CARD-DLQR0001",
+            "event_id": "EVT-DLQR001",
+            "commander_id": "CMD-001",
+        },
+    )
+    exec_id = resp.json()["execution_id"]
+    await asyncio.sleep(1.0)
+
+    dlq_status = (await client.get(f"/execute/status/{exec_id}")).json()
+    assert dlq_status["status"] == ExecutionStatus.DEAD_LETTER
+
+    # Swap in a healthy client and retry
+    await _fresh_queue(MockStationClient(failure_rate=0.0))
+    retry_resp = await client.post(f"/execute/retry/{exec_id}")
+    assert retry_resp.status_code == 200
+    assert retry_resp.json()["status"] == ExecutionStatus.PENDING
+
+    await asyncio.sleep(0.5)
+    final_status = (await client.get(f"/execute/status/{exec_id}")).json()
+    assert final_status["status"] == ExecutionStatus.ACKNOWLEDGED
+
+
+@pytest.mark.asyncio
+async def test_manual_retry_rejects_non_dlq_execution(monkeypatch, client):
+    """Retrying a PENDING/ACKNOWLEDGED execution must return 409."""
+    monkeypatch.setattr(settings, "governance_shadow_mode", False)
+    monkeypatch.setattr(settings, "governance_tier", "1")
+
+    await _fresh_queue(MockStationClient(failure_rate=0.0))
+
+    resp = await client.post(
+        "/execute/dispatch",
+        json={
+            "approval_token": "APPR-409-001",
+            "card_id": "CARD-4090001",
+            "event_id": "EVT-409001",
+            "commander_id": "CMD-001",
+        },
+    )
+    exec_id = resp.json()["execution_id"]
+    await asyncio.sleep(0.3)
+
+    retry_resp = await client.post(f"/execute/retry/{exec_id}")
+    assert retry_resp.status_code == 409
