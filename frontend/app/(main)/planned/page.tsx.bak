@@ -54,7 +54,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { AppHeader } from "@/components/app-header";
 import { EmptyState } from "@/components/empty-state";
 import { StatCard } from "@/components/stat-card";
-import { InfoPopover } from "@/components/info-popover";
 import { api } from "@/lib/api";
 import type {
   AnalogEvent,
@@ -853,11 +852,11 @@ export default function PlannedPage() {
       </AppHeader>
 
       <div className="flex-1 overflow-y-auto">
-        <div id="tour-planned-header" className="p-6 max-w-5xl mx-auto space-y-5 animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
+        <div className="p-6 max-w-5xl mx-auto space-y-5 animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
 
           {/* KPI row */}
           {!loading && packages.length > 0 && (
-            <div id="tour-planned-kpi" className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <StatCard title="Deploy Now" value={criticalCount} icon={ShieldAlert} description="Window closing — act immediately" valueClassName={criticalCount > 0 ? "text-destructive" : "text-live"} />
               <StatCard title="Starting < 6h" value={highCount} icon={Clock} description="High urgency events" valueClassName={highCount > 0 ? "text-destructive" : "text-muted-foreground"} />
               <StatCard title="Need Staging" value={needsStagingCount} icon={Wrench} description="Barricade staging required" valueClassName={needsStagingCount > 0 ? "text-warn" : "text-muted-foreground"} />
@@ -871,10 +870,6 @@ export default function PlannedPage() {
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Filter className="size-3.5" />
                 <span className="font-medium">Filter</span>
-                <InfoPopover
-                  title="Filter Events"
-                  description="Narrow by corridor name (e.g. 'MG Road') or event type. The KPI cards above always reflect the filtered list."
-                />
               </div>
               <Input
                 className="h-7 text-xs w-44"
@@ -958,7 +953,7 @@ export default function PlannedPage() {
                   </>
                 )}
               </div>
-              <div id="tour-planned-events" className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 md:grid-cols-2">
                 {sorted.map((pkg) => (
                   <EventCard
                     key={pkg.event_id}

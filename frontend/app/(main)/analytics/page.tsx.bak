@@ -34,7 +34,6 @@ import {
 import { AppHeader } from "@/components/app-header";
 import { EmptyState } from "@/components/empty-state";
 import { StatCard } from "@/components/stat-card";
-import { InfoPopover } from "@/components/info-popover";
 import { api } from "@/lib/api";
 import type {
   AnomaliesResponse,
@@ -224,7 +223,7 @@ export default function AnalyticsPage() {
       </AppHeader>
 
       <div className="flex-1 overflow-y-auto">
-        <div id="tour-analytics-header" className="p-6 max-w-6xl mx-auto space-y-5 animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
+        <div className="p-6 max-w-6xl mx-auto space-y-5 animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
 
           {/* ── Situation Banner ─────────────────────────────────── */}
           {!loading && (
@@ -282,13 +281,7 @@ export default function AnalyticsPage() {
             <CardHeader className="pb-2">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <div className="flex items-center gap-1.5">
-                    <CardTitle className="text-sm">Corridor Watch — Next 4 Hours</CardTitle>
-                    <InfoPopover
-                      title="Corridor Watch"
-                      description="Poisson model forecast for the next 4 hours across major corridors. 'At Risk' means event volume is predicted >15% above the historical baseline — expect congestion."
-                    />
-                  </div>
+                  <CardTitle className="text-sm">Corridor Watch — Next 4 Hours</CardTitle>
                   <CardDescription className="text-xs mt-0.5">
                     Ranked by urgency. <span className="text-destructive font-medium">At Risk</span> = &gt;15% above baseline.{" "}
                     <span className="text-warn font-medium">Elevated</span> = &gt;5%.{" "}
@@ -351,13 +344,7 @@ export default function AnalyticsPage() {
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <div className="flex items-center gap-1.5">
-                      <CardTitle className="text-sm">CUSUM Anomaly Detail</CardTitle>
-                      <InfoPopover
-                        title="CUSUM Anomaly Detection"
-                        description="CUSUM (Cumulative Sum) is a statistical test that flags when a corridor's event rate has shifted significantly from its normal pattern — like a sudden spike not explained by known planned events."
-                      />
-                    </div>
+                    <CardTitle className="text-sm">CUSUM Anomaly Detail</CardTitle>
                     <CardDescription className="text-xs mt-0.5">Corridors with statistically unusual event rates (last 24 h)</CardDescription>
                   </div>
                   {anomalyCount > 0 && (
@@ -410,13 +397,7 @@ export default function AnalyticsPage() {
             {/* Hourly pattern for densest cell */}
             <Card>
               <CardHeader className="pb-2">
-                <div className="flex items-center gap-1.5">
-                  <CardTitle className="text-sm">Hourly Congestion Pattern</CardTitle>
-                  <InfoPopover
-                    title="Hourly Congestion Pattern"
-                    description="Shows how events are distributed by hour of day at the densest active grid cell. Peaks reveal rush-hour patterns and recurring congestion windows for proactive deployment."
-                  />
-                </div>
+                <CardTitle className="text-sm">Hourly Congestion Pattern</CardTitle>
                 <CardDescription className="text-xs mt-0.5">
                   Events by hour of day (IST) — densest active hotspot cell
                   {cellHistory && (

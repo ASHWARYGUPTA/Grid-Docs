@@ -1,5 +1,20 @@
 // Mirrors backend Pydantic schemas — see backend/src/grid_unlocked/*/schemas.py
 
+export interface AnomalyAlert {
+  alert_id: string;
+  corridor: string;
+  zone: string | null;
+  observed_rate_per_hour: number;
+  baseline_rate_per_hour: number;
+  sigma: number;
+  detected_at: string;
+}
+
+export interface AnomaliesResponse {
+  alerts: AnomalyAlert[];
+  window_hours: number;
+}
+
 export type SeverityBand = "Green" | "Yellow" | "Orange" | "Red";
 export type AlertPriority = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
 export type CardStatus = "partial" | "complete" | "approved" | "rejected" | "executed";
@@ -111,6 +126,38 @@ export interface QueueItem {
 export interface QueueResponse {
   items: QueueItem[];
   count: number;
+}
+
+export interface TierTransition {
+  id: number;
+  from_tier: Tier | null;
+  to_tier: Tier;
+  reason: string;
+  operator_id: string | null;
+  created_at: string;
+}
+
+export interface TierTransitionsResponse {
+  transitions: TierTransition[];
+  count: number;
+}
+
+export interface PromotionChecklistItem {
+  item: string;
+  complete: boolean;
+  detail: string;
+}
+
+export interface PromotionChecklistResponse {
+  model_version: string;
+  items: PromotionChecklistItem[];
+  all_complete: boolean;
+}
+
+export interface PromotionApproveResponse {
+  model_version: string;
+  approved: boolean;
+  message: string;
 }
 
 export interface GovernanceTierResponse {
@@ -306,6 +353,42 @@ export interface ImpactOverlay {
   source: string;
 }
 
+export interface AnalogEvent {
+  event_id: string;
+  corridor: string | null;
+  cause: string;
+  closure: boolean;
+  ict_h: number | null;
+  start_datetime: string | null;
+}
+
+export interface DiversionRef {
+  junction_id: string;
+  description: string;
+  route_summary: string;
+  rank: number;
+}
+
+export interface IngestAck {
+  event_id: string;
+  status: string;
+  normalized: boolean;
+  anomaly_flags: string[];
+  latency_ms: number;
+}
+
+export interface PlannedIngestPayload {
+  event_id?: string;
+  event_cause: string;
+  corridor?: string | null;
+  start_datetime: string;
+  end_datetime?: string | null;
+  latitude: number;
+  longitude: number;
+  description?: string | null;
+  requires_road_closure?: boolean;
+}
+
 export interface PlannedEventPackage {
   event_id: string;
   template_id: string;
@@ -319,6 +402,8 @@ export interface PlannedEventPackage {
   barricade_staging_required: boolean;
   deployment_lead_time_hours: number;
   checklist: ChecklistItem[];
+  analog_events: AnalogEvent[];
+  diversion_refs: DiversionRef[];
   impact_overlay: ImpactOverlay;
   compliance_items: string[];
   low_confidence_template: boolean;
@@ -430,6 +515,12 @@ export interface CitizenReportStatusResponse {
   corridor: string | null;
   h3_cell: string;
   created_at: string;
+}
+
+export interface SubscriptionRequest {
+  user_ref: string;
+  corridors: string[];
+  h3_cells: string[];
 }
 
 export interface SubscriptionRequest {

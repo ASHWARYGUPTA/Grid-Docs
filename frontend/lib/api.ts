@@ -1,6 +1,9 @@
 import type {
   AckResponse,
   ActionCard,
+  AnomaliesResponse,
+  IngestAck,
+  PlannedIngestPayload,
   BufferManifestResponse,
   CellHistorySummary,
   CitizenReport,
@@ -22,6 +25,9 @@ import type {
   ScenarioResponse,
   SubscriptionRequest,
   SubscriptionResponse,
+  TierTransitionsResponse,
+  PromotionChecklistResponse,
+  PromotionApproveResponse,
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -61,6 +67,9 @@ export const api = {
     }),
 
   hotspotsObserved: () => request<ObservedHotspotsResponse>("/hotspots/observed"),
+
+  hotspotsAnomalies: (windowHours = 24) =>
+    request<AnomaliesResponse>(`/hotspots/anomalies?window_hours=${windowHours}`),
 
   hotspotsDensity: (minCount = 1) =>
     request<DensityHotspotsResponse>(`/hotspots/density?min_count=${minCount}`),
@@ -162,4 +171,28 @@ export const api = {
       `/citizen/subscribe/${subscriptionId}`,
       { method: "DELETE" }
     ),
+
+  ingestPlanned: (payload: PlannedIngestPayload) =>
+    request<IngestAck>("/ingest/planned", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  governanceTransitions: (limit = 50) =>
+    request<TierTransitionsResponse>(`/governance/transitions?limit=${limit}`),
+
+  promotionChecklist: (modelVersion: string) =>
+    request<PromotionChecklistResponse>(`/governance/promotion/checklist/${modelVersion}`),
+
+  approvePromotion: (modelVersion: string, operatorId: string) =>
+    request<PromotionApproveResponse>("/governance/promotion/approve", {
+      method: "POST",
+      body: JSON.stringify({ model_version: modelVersion, operator_id: operatorId }),
+    }),
+
+  generatePackage: (eventId: string, forceRefresh = false) =>
+    request<import("./types").PlannedEventPackage>("/planned/package", {
+      method: "POST",
+      body: JSON.stringify({ event_id: eventId, force_refresh: forceRefresh }),
+    }),
 };

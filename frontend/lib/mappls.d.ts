@@ -27,6 +27,7 @@ declare class MapplsMap {
   getLayer(id: string): unknown | undefined;
   removeLayer(id: string): void;
   remove(): void;
+  resize(): void;
 }
 
 interface MapplsMarkerOptions {

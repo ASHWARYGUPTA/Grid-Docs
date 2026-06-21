@@ -1,16 +1,37 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Shield } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { useDashboardSocket } from "@/lib/ws";
 import type { GovernanceTierResponse } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
-const TIER_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
-  "1": "default",
-  "2": "secondary",
-  "3": "destructive",
+const TIER_CONFIG: Record<
+  string,
+  {
+    variant: "default" | "secondary" | "destructive";
+    dot: string;
+    label: string;
+  }
+> = {
+  "1": {
+    variant: "default",
+    dot: "bg-live",
+    label: "Tier 1",
+  },
+  "2": {
+    variant: "secondary",
+    dot: "bg-warn",
+    label: "Tier 2",
+  },
+  "3": {
+    variant: "destructive",
+    dot: "bg-critical animate-pulse-ring",
+    label: "Tier 3",
+  },
 };
 
 const POLL_INTERVAL_MS = 30_000;
@@ -45,27 +66,41 @@ export function TierBadge() {
   }, [lastDelta]);
 
   if (!tier) {
-    return <Badge variant="outline">Tier —</Badge>;
+    return (
+      <Badge variant="outline" className="gap-1.5 text-xs">
+        <span className="size-1.5 rounded-full bg-muted-foreground animate-pulse" />
+        Tier —
+      </Badge>
+    );
   }
 
+  const config = TIER_CONFIG[tier.tier] ?? TIER_CONFIG["1"];
+
   return (
-    <div className="flex items-center gap-2">
-      <Tooltip>
-        <TooltipTrigger
-          render={<Badge variant={TIER_VARIANT[tier.tier] ?? "outline"} />}
+    <Tooltip>
+      <TooltipTrigger className="cursor-help">
+        <Badge
+          variant={config.variant}
+          className="gap-1.5 text-xs select-none"
         >
-          Tier {tier.tier}
-          {tier.shadow_mode ? " · Shadow" : ""}
-        </TooltipTrigger>
-        <TooltipContent>
-          {tier.manual_mode
-            ? "Tier 3 — manual SOP mode, automated dispatch/promotion disabled"
-            : tier.tier === "2"
-              ? "Tier 2 — greedy fallback only, MILP/ML untrustworthy"
-              : "Tier 1 — full MILP + ML pipeline active"}
-          {tier.shadow_mode ? " (shadow mode: approvals logged, not executed)" : ""}
-        </TooltipContent>
-      </Tooltip>
-    </div>
+          <Shield className="size-3 shrink-0" />
+          <span
+            className={cn("size-1.5 rounded-full shrink-0", config.dot)}
+          />
+          {config.label}
+          {tier.shadow_mode && " · Shadow"}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-xs text-xs">
+        {tier.manual_mode
+          ? "Tier 3 — manual SOP mode, automated dispatch & promotion disabled"
+          : tier.tier === "2"
+            ? "Tier 2 — greedy fallback only, MILP/ML pipeline unavailable"
+            : "Tier 1 — full MILP + ML pipeline active"}
+        {tier.shadow_mode
+          ? " · Shadow mode: approvals are logged but not dispatched"
+          : ""}
+      </TooltipContent>
+    </Tooltip>
   );
 }

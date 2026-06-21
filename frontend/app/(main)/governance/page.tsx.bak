@@ -22,7 +22,6 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { InfoPopover } from "@/components/info-popover";
 import {
   Card,
   CardContent,
@@ -307,18 +306,13 @@ function HealthPanel() {
       )}
 
       <Card>
-        <CardHeader id="tour-governance-health" className="flex-row items-center justify-between pb-3">
+        <CardHeader className="flex-row items-center justify-between pb-3">
           <CardTitle className="text-sm flex items-center gap-2">
             <Badge variant="outline" className={cn("gap-1.5 text-xs", STATUS_CONFIG[health.overall_status]?.badgeClass)}>
               <span className={cn("size-1.5 rounded-full", STATUS_CONFIG[health.overall_status]?.dot)} />
               {health.overall_status}
             </Badge>
             Module Health
-            <InfoPopover
-              title="Module Health"
-              description="M01 = data ingestion, M02 = feature graph, M03 = ML impact engine. M01+M02 both down → Tier 3. Only M03 down → Tier 2 (rule fallback). Click a row to see detailed metrics."
-              side="right"
-            />
           </CardTitle>
           <div className="flex items-center gap-2">
             {refreshed && (
@@ -794,35 +788,6 @@ export default function GovernancePage() {
       <AppHeader title="Governance" />
       <div className="flex-1 overflow-y-auto">
         <div className="p-6 max-w-5xl mx-auto space-y-5 animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
-
-          {/* Plain-English explainer — always visible */}
-          <div id="tour-governance-tier" className="rounded-xl border border-border/60 bg-muted/30 p-4 space-y-3">
-            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-              <Shield className="size-3.5 text-primary" />
-              How the system tiers work
-              <InfoPopover
-                title="Governance tiers"
-                description="The system automatically degrades to a safer mode when components fail, then recovers when they're healthy again. Admins can manually force a tier at any time."
-              />
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-              <div className="rounded-lg border border-live/30 bg-live/5 px-3 py-2.5">
-                <p className="font-semibold text-live mb-1">Tier 1 — Full AI</p>
-                <p className="text-muted-foreground leading-relaxed">All systems healthy. The AI solver (MILP) finds the optimal dispatch within 1.5 seconds. If it times out, a fast greedy fallback kicks in automatically. This is normal operating mode.</p>
-              </div>
-              <div className="rounded-lg border border-warn/30 bg-warn/5 px-3 py-2.5">
-                <p className="font-semibold text-warn mb-1">Tier 2 — Rule-based</p>
-                <p className="text-muted-foreground leading-relaxed">The ML model (M03) or live data APIs are partially down. The AI switches to simpler rule-based scoring instead. Recommendations are less precise but still reliable. Usually recovers automatically.</p>
-              </div>
-              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5">
-                <p className="font-semibold text-destructive mb-1">Tier 3 — Manual SOP</p>
-                <p className="text-muted-foreground leading-relaxed">Major outage — both data ingestion and feature services are down. The system falls back to static Standard Operating Procedure templates. Commanders operate manually; all actions are audit-logged.</p>
-              </div>
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              <span className="font-medium">Shadow mode</span> — when enabled, the AI produces recommendations but does not act on them. Useful for validating a new model version against live outcomes before promoting it to production.
-            </p>
-          </div>
 
           {/* Tier control panel — always visible */}
           <TierControlPanel />
