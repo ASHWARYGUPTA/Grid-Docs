@@ -73,6 +73,7 @@ class EvidenceBundle(BaseModel):
 class ActionCard(BaseModel):
     card_id: str
     event_id: str
+    source: str = "astram"
     status: CardStatus
     alert_priority: AlertPriority
     impact: ImpactScore

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, LargeBinary, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -411,3 +411,141 @@ class LearningJobRow(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# M17 — CitizenReportService tables
+# ---------------------------------------------------------------------------
+
+
+class CorridorCentroidRow(Base):
+    """One mean lat/lon per corridor, seeded once from astram_events.csv."""
+
+    __tablename__ = "corridor_centroids"
+
+    corridor: Mapped[str] = mapped_column(String(128), primary_key=True)
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lon: Mapped[float] = mapped_column(Float, nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class CitizenReportRow(Base):
+    """Citizen-submitted report — snap result, ICT quote snapshot, verification state."""
+
+    __tablename__ = "citizen_reports"
+
+    report_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    event_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    location_source: Mapped[str] = mapped_column(String(16), nullable=False)  # device | exif
+    h3_cell: Mapped[str] = mapped_column(String(16), nullable=False)
+    corridor: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    junction: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
+    cause_hint: Mapped[str] = mapped_column(String(64), nullable=False)
+    cause_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+
+    ict_p50: Mapped[float] = mapped_column(Float, nullable=False)
+    ict_p80: Mapped[float] = mapped_column(Float, nullable=False)
+    p_closure: Mapped[float] = mapped_column(Float, nullable=False)
+    ict_quote_source: Mapped[str] = mapped_column(String(24), nullable=False)  # m03_live | corridor_prior_fallback
+
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    photo_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    photo_content_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    reject_reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verified_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rejected_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_citizen_reports_status", "status"),
+        Index("ix_citizen_reports_h3_cell", "h3_cell"),
+    )
+
+
+class CorridorSubscriptionRow(Base):
+    """user_ref subscribed to a set of corridors and/or H3 cells for pre-alerts."""
+
+    __tablename__ = "corridor_subscriptions"
+
+    subscription_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_ref: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    corridors_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    h3_cells_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_corridor_subscriptions_active", "active"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# M16 — FieldOfficerApp tables
+# ---------------------------------------------------------------------------
+
+
+class FieldClosureRow(Base):
+    """Officer-submitted closure resource labels — report of record for M13."""
+
+    __tablename__ = "field_closures"
+
+    closure_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    recommendation_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    barricades_used: Mapped[int] = mapped_column(Integer, nullable=False)
+    officers_used: Mapped[int] = mapped_column(Integer, nullable=False)
+    diversion_activated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    closed_datetime: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    officer_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class FieldAcknowledgementRow(Base):
+    """One ack per dispatch recommendation — upsert keyed by recommendation_id."""
+
+    __tablename__ = "field_acknowledgements"
+
+    recommendation_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    officer_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    acknowledged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+# ---------------------------------------------------------------------------
+# M12 — TransitImpactService tables
+# ---------------------------------------------------------------------------
+
+
+class TransitImpactCacheRow(Base):
+    """Per-event cached TransitImpactIndex payload, TTL checked at read-time."""
+
+    __tablename__ = "transit_impact_cache"
+
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

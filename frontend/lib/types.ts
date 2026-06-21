@@ -76,6 +76,7 @@ export interface EvidenceBundle {
 export interface ActionCard {
   card_id: string;
   event_id: string;
+  source: string;
   status: CardStatus;
   alert_priority: AlertPriority;
   impact: ImpactScore;
@@ -326,7 +327,7 @@ export interface PlannedEventPackage {
   generated_at: string;
 }
 
-export type DeltaScope = "card" | "tier" | "hotspot";
+export type DeltaScope = "card" | "tier" | "hotspot" | "citizen" | "field";
 
 export interface DashboardDelta {
   type: "dashboard.delta";
@@ -334,4 +335,120 @@ export interface DashboardDelta {
   event_id: string | null;
   payload: Record<string, unknown>;
   emitted_at: string;
+}
+
+export interface FieldAssignmentSummary {
+  unit_id: string;
+  station_id: string;
+  equip_type: string;
+  eta_min: number;
+  rci: number;
+  cascade_risk: number;
+  needs_heavy_tow: boolean;
+}
+
+export interface FieldDiversionSummary {
+  junction_id: string;
+  description: string;
+  route_summary: string;
+  eta_delta_min: number;
+  capacity_class: string;
+  available: boolean;
+}
+
+export interface FieldIctBands {
+  ict_p20_h: number;
+  ict_p50_h: number;
+  ict_p80_h: number;
+  severity_band: string;
+}
+
+export interface FieldPacket {
+  recommendation_id: string;
+  event_id: string;
+  source: DispatchSource;
+  tier_at_decision: Tier;
+  assignments: FieldAssignmentSummary[];
+  impact: FieldIctBands;
+  top_diversion: FieldDiversionSummary | null;
+  navigation_deep_link: string;
+  event_status: string;
+  already_closed: boolean;
+  acknowledged: boolean;
+  acknowledged_at: string | null;
+  provenance: Record<string, string>;
+  generated_at: string;
+}
+
+export interface AckResponse {
+  recommendation_id: string;
+  acknowledged: boolean;
+  acknowledged_at: string;
+}
+
+export interface ClosureRequest {
+  closed_datetime: string;
+  barricades_used: number;
+  officers_used: number;
+  diversion_activated: boolean;
+  notes: string | null;
+  officer_id: string;
+}
+
+export interface ClosureResponse {
+  event_id: string;
+  closure_id: string;
+  event_closed: boolean;
+  closed_datetime: string;
+  queued_offline: boolean;
+}
+
+export type CitizenReportStatus = "pending" | "verified" | "rejected";
+
+export interface CitizenReport {
+  report_id: string;
+  status: CitizenReportStatus;
+  h3_cell: string;
+  corridor: string | null;
+  junction: string | null;
+  ict_p50: number;
+  ict_p80: number;
+  p_closure: number;
+  cause_hint: string;
+  cause_confidence: number;
+  event_id: string | null;
+  has_photo: boolean;
+  created_at: string;
+}
+
+export interface CitizenReportStatusResponse {
+  report_id: string;
+  status: CitizenReportStatus;
+  ict_p50: number;
+  ict_p80: number;
+  p_closure: number;
+  corridor: string | null;
+  h3_cell: string;
+  created_at: string;
+}
+
+export interface SubscriptionRequest {
+  user_ref: string;
+  corridors: string[];
+  h3_cells: string[];
+}
+
+export interface SubscriptionResponse {
+  subscription_id: string;
+  user_ref: string;
+  corridors: string[];
+  h3_cells: string[];
+  created_at: string;
+}
+
+export interface CitizenPreAlertPayload {
+  type: "CitizenPreAlert";
+  subscription_id: string;
+  alert_type: "hotspot" | "propagation";
+  severity_band: string;
 }

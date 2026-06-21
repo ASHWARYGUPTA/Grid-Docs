@@ -1,10 +1,16 @@
 import type {
+  AckResponse,
   ActionCard,
   BufferManifestResponse,
   CellHistorySummary,
+  CitizenReport,
+  CitizenReportStatusResponse,
+  ClosureRequest,
+  ClosureResponse,
   DensityHotspotsResponse,
   DrillResult,
   EvalResponse,
+  FieldPacket,
   GovernanceTierResponse,
   HealthRollup,
   LatestJobResponse,
@@ -14,6 +20,8 @@ import type {
   PropagationMap,
   QueueResponse,
   ScenarioResponse,
+  SubscriptionRequest,
+  SubscriptionResponse,
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -109,4 +117,49 @@ export const api = {
 
   plannedUpcoming: (hours = 72) =>
     request<PlannedEventPackage[]>(`/planned/upcoming?hours=${hours}`),
+
+  fieldPacket: (recommendationId: string) =>
+    request<FieldPacket>(`/field/packet/${recommendationId}`),
+
+  fieldAck: (recommendationId: string, officerId: string) =>
+    request<AckResponse>(`/field/ack/${recommendationId}`, {
+      method: "POST",
+      body: JSON.stringify({ officer_id: officerId }),
+    }),
+
+  fieldClose: (eventId: string, closure: ClosureRequest) =>
+    request<ClosureResponse>(`/field/close/${eventId}`, {
+      method: "POST",
+      body: JSON.stringify(closure),
+    }),
+
+  fieldTier: () => request<GovernanceTierResponse>("/field/tier"),
+
+  citizenReport: async (formData: FormData) => {
+    const res = await fetch(`${API_URL}/citizen/report`, {
+      method: "POST",
+      body: formData,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail ?? `POST /citizen/report failed: ${res.status}`);
+    }
+    return res.json() as Promise<CitizenReport>;
+  },
+
+  citizenReportStatus: (reportId: string) =>
+    request<CitizenReportStatusResponse>(`/citizen/report/${reportId}`),
+
+  citizenSubscribe: (body: SubscriptionRequest) =>
+    request<SubscriptionResponse>("/citizen/subscribe", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  citizenUnsubscribe: (subscriptionId: string) =>
+    request<{ subscription_id: string; status: string }>(
+      `/citizen/subscribe/${subscriptionId}`,
+      { method: "DELETE" }
+    ),
 };

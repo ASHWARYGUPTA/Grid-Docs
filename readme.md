@@ -7,8 +7,8 @@ Intelligent event-driven traffic management layer for ASTraM (Bengaluru Traffic 
 ```
 Grid Unlocked/
 ├── docs/               # PRD, architecture, tech stack, assets
-├── backend/            # Python API (uv) — M01–M11, M13, M14, M15 (WS) modules
-├── frontend/           # Next.js CommandDashboard (M15) — also hosts M16/M18 routes later
+├── backend/            # Python API (uv) — M01–M18 modules (M12 stubbed per spec)
+├── frontend/           # Next.js CommandDashboard (M15) — also hosts M16 field route, M18 report route
 ├── data/               # ASTraM corpus + cleaned feature dataset
 ├── Dockerfile          # API container
 ├── docker-compose.yml  # Local dev: Postgres + Redis + API + frontend
@@ -70,7 +70,7 @@ pnpm dev   # http://localhost:3000/live, expects the API at NEXT_PUBLIC_API_URL 
 | Document | Description |
 |---|---|
 | [docs/TECH_STACK.md](docs/TECH_STACK.md) | Stack, databases, dev vs prod |
-| [docs/implementation/](docs/implementation/) | **Built modules** — M01–M11, M13, M14, M15 implementation records |
+| [docs/implementation/](docs/implementation/) | **Built modules** — M01–M18 implementation records (full coverage) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design |
 | [docs/PRD_Event_Driven_Traffic.md](docs/PRD_Event_Driven_Traffic.md) | Product requirements |
 | [docs/IMPLEMENTATION_MODULES.md](docs/IMPLEMENTATION_MODULES.md) | Module contracts |

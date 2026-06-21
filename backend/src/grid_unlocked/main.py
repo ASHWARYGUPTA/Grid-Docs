@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 # M14 — health probe cycle interval (spec: "probe cycle 30 s")
 _GOVERNANCE_PROBE_INTERVAL_S = 30
 
+# M17 — pre-alert matcher poll interval (spec test: "within 10s of M05 update")
+_CITIZEN_PRE_ALERT_INTERVAL_S = 10
+
 
 async def _governance_probe_loop() -> None:
     """Background task: re-evaluate automatic tier transitions every 30s."""
@@ -35,6 +38,21 @@ async def _governance_probe_loop() -> None:
             raise
         except Exception:
             logger.exception("M14 governance probe cycle failed")
+
+
+async def _citizen_pre_alert_loop() -> None:
+    """Background task: poll M05/M04 state and fan out CitizenPreAlerts every 10s."""
+    while True:
+        try:
+            await asyncio.sleep(_CITIZEN_PRE_ALERT_INTERVAL_S)
+            async with SessionLocal() as session:
+                from grid_unlocked.citizen.service import CitizenService
+
+                await CitizenService(session).check_pre_alerts()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("M17 citizen pre-alert cycle failed")
 
 
 @asynccontextmanager
@@ -56,10 +74,25 @@ async def lifespan(_: FastAPI):
         service = FeatureService(session)
         await service.ensure_priors_seeded()
 
+    # M17 — seed corridor centroid lookup from the ASTraM CSV
+    async with SessionLocal() as session:
+        from grid_unlocked.citizen.centroid_seed import (
+            centroids_need_seed,
+            seed_corridor_centroids_from_csv,
+        )
+
+        if await centroids_need_seed(session):
+            await seed_corridor_centroids_from_csv(session)
+
     # M14 — seed governance_state from settings defaults and warm the cache
     async with SessionLocal() as session:
         await GovernanceService(session).bootstrap()
     probe_task = asyncio.create_task(_governance_probe_loop(), name="m14-governance-probe")
+
+    # M17 — start citizen pre-alert poll loop
+    pre_alert_task = asyncio.create_task(
+        _citizen_pre_alert_loop(), name="m17-citizen-pre-alert"
+    )
 
     # M10 — start background command queue worker
     queue = await setup_command_queue()
@@ -69,6 +102,7 @@ async def lifespan(_: FastAPI):
     # M10 — graceful shutdown
     await queue.stop()
     probe_task.cancel()
+    pre_alert_task.cancel()
     await close_redis()
 
 
@@ -129,6 +163,10 @@ def create_app() -> FastAPI:
 
     app.include_router(vms_router)
     app.include_router(vms_mock_router)
+    from grid_unlocked.transit.router import mock_router as transit_mock_router, router as transit_router
+
+    app.include_router(transit_router)
+    app.include_router(transit_mock_router)
     from grid_unlocked.governance.router import router as governance_router
 
     app.include_router(governance_router)
@@ -138,6 +176,12 @@ def create_app() -> FastAPI:
     from grid_unlocked.dashboard.router import router as dashboard_router
 
     app.include_router(dashboard_router)
+    from grid_unlocked.citizen.router import router as citizen_router
+
+    app.include_router(citizen_router)
+    from grid_unlocked.field.router import router as field_router
+
+    app.include_router(field_router)
 
     @app.get("/health", tags=["health"])
     async def system_health() -> dict:

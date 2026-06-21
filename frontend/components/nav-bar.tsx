@@ -9,6 +9,7 @@ const ROUTES = [
   { href: "/planned", label: "Planned" },
   { href: "/governance", label: "Governance" },
   { href: "/analytics", label: "Analytics" },
+  { href: "/report", label: "Report" },
 ];
 
 export function NavBar() {

@@ -9,6 +9,8 @@ class DeltaScope(StrEnum):
     CARD = "card"
     TIER = "tier"
     HOTSPOT = "hotspot"
+    CITIZEN = "citizen"
+    FIELD = "field"
 
 
 class DashboardDelta(BaseModel):

@@ -113,8 +113,11 @@ page reload to resume receiving deltas.
 ### Citizen triage placeholder
 
 `/analytics` renders an explicit empty state ("Citizen reporting service
-not yet available") rather than a stub form or silently-omitted route —
-M17 CitizenReportService doesn't exist in this codebase yet.
+not yet available") rather than a stub form or silently-omitted route. M17
+CitizenReportService has since been implemented (see
+[M17_CitizenReportService.md](M17_CitizenReportService.md)) but this panel
+has not yet been wired to it — that's M18/dashboard follow-up work, not
+done as part of M17 itself.
 
 ---
 
@@ -237,7 +240,8 @@ artifacts, not the rule fallback.
 ## Known limitations (MVP, deliberate scope reductions)
 
 - `D-M15-01` — Citizen triage (`/analytics`) is an explicit placeholder;
-  M17 CitizenReportService doesn't exist yet.
+  M17 CitizenReportService is now implemented but not yet wired into this
+  panel.
 - `D-M15-02` — WebSocket fanout is in-process (`DashboardBus`), not Redis
   pub/sub — same "MVP now, Redis Phase 1.5" precedent as M01's event bus.
   A future multi-instance deployment would need this swapped for a shared

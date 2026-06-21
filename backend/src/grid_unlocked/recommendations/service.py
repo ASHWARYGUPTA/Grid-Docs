@@ -150,10 +150,18 @@ class RecommendationService:
         skeleton_ms = round((time.perf_counter() - t0) * 1000, 2)
 
         dispatch_section: DispatchSection | None = None
-        dispatch_pending = mode == CardMode.SKELETON or gov.tier == "3"
         field_link: str | None = None
 
-        include_dispatch = mode in {CardMode.COMPLETE, CardMode.AUTO} and gov.tier != "3"
+        unauthenticated_hold = (
+            mode in {CardMode.COMPLETE, CardMode.AUTO}
+            and gov.tier != "3"
+            and not row.authenticated
+        )
+        dispatch_pending = mode == CardMode.SKELETON or gov.tier == "3" or unauthenticated_hold
+
+        include_dispatch = (
+            mode in {CardMode.COMPLETE, CardMode.AUTO} and gov.tier != "3" and row.authenticated
+        )
         if include_dispatch:
             tier = GovernanceTier(gov.tier)
             rec = await self.dispatch.recommend(
@@ -190,6 +198,7 @@ class RecommendationService:
         card = ActionCard(
             card_id=card_id,
             event_id=event_id,
+            source=row.source,
             status=card_status,
             alert_priority=_alert_priority(
                 impact.rci,
@@ -224,7 +233,9 @@ class RecommendationService:
             provenance={
                 "impact": impact.model_versions.source,
                 "propagation": "GCDH",
-                "dispatch": dispatch_section.provenance if dispatch_section else "pending",
+                "dispatch": dispatch_section.provenance
+                if dispatch_section
+                else ("awaiting_citizen_verification" if unauthenticated_hold else "pending"),
                 "diversions": "M08_atlas",
             },
             skeleton_ms=skeleton_ms,
@@ -257,6 +268,7 @@ class RecommendationService:
         return ActionCard(
             card_id=card_id,
             event_id=event_id,
+            source=row.source,
             status=CardStatus.PARTIAL,
             alert_priority=AlertPriority.MEDIUM,
             impact=impact,

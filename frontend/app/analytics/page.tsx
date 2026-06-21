@@ -6,12 +6,15 @@ export default function AnalyticsPage() {
       <h1 className="text-lg font-semibold mb-4">Citizen triage</h1>
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Citizen reporting service not yet available</CardTitle>
+          <CardTitle className="text-base">Commander triage UI not yet built</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          M17 CitizenReportService has not been implemented yet — photo submissions, ICT-band
-          triage, and verify/reject workflows for source=CITIZEN events will appear here once
-          that module ships.
+          M17 CitizenReportService and M18 CitizenApp are implemented — commuters can submit
+          photo+GPS reports at <code>/report</code>, and the backend exposes{" "}
+          <code>POST /citizen/verify/{"{report_id}"}</code> /{" "}
+          <code>POST /citizen/reject/{"{report_id}"}</code>. A dedicated commander-facing panel
+          surfacing pending citizen reports on this dashboard has not been built yet — that
+          integration remains a gap.
         </CardContent>
       </Card>
     </div>
