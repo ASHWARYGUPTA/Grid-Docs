@@ -33,21 +33,32 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     environment:
       GRID_DATABASE_URL: postgresql+asyncpg://grid:grid@postgres:5432/grid_unlocked
       GRID_REDIS_URL: redis://redis:6379/0
       GRID_ASTRAM_CSV_PATH: /app/data/astram_events.csv
+      GRID_MODELS_DIR: /app/backend/models/v1
     volumes:
       # Hot reload for local dev — remove in prod
       - ./backend/src:/app/backend/src:ro
       - ./data:/app/data:ro
+      # Read-write: M13 retrain/promotion writes new v2/, v3/, ... here at runtime
+      - ./backend/models:/app/backend/models
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     command: >
       uv run uvicorn grid_unlocked.main:app
       --host 0.0.0.0
@@ -55,6 +66,24 @@ services:
       --reload
       --reload-dir /app/backend/src
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    volumes:
+      # Hot reload for local dev — remove in prod
+      - ./frontend:/app:cached
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      api:
+        condition: service_healthy
+    command: pnpm dev
+
 volumes:
   pgdata:
   redisdata:
+  frontend_node_modules:

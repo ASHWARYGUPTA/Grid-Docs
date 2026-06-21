@@ -131,6 +131,8 @@ async def test_queue_ordered_by_rci(client):
     assert len(items) >= 2
     rcis = [i["rci"] for i in items]
     assert rcis == sorted(rcis, reverse=True)
+    for item in items:
+        assert 0.0 <= item["p_closure"] <= 1.0
 
 
 @pytest.mark.asyncio

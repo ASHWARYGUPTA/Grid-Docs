@@ -1,0 +1,117 @@
+"use client";
+
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { CheckCircle2, AlertCircle } from "lucide-react";
+import { cn } from "@/lib/utils";
+import type { QueueItem } from "@/lib/types";
+import { EmptyState } from "@/components/empty-state";
+
+const PRIORITY_CONFIG: Record<
+  string,
+  {
+    label: string;
+    badge: string;
+    row: string;
+  }
+> = {
+  CRITICAL: {
+    label: "CRITICAL",
+    badge:
+      "bg-destructive/15 text-destructive border-destructive/40 animate-pulse-ring",
+    row: "bg-destructive/5 border-l-2 border-l-destructive",
+  },
+  HIGH: {
+    label: "HIGH",
+    badge: "bg-warn/15 text-warn border-warn/30",
+    row: "border-l-2 border-l-warn",
+  },
+  MEDIUM: {
+    label: "MEDIUM",
+    badge: "bg-primary/10 text-primary border-primary/30",
+    row: "border-l-2 border-l-primary/40",
+  },
+  LOW: {
+    label: "LOW",
+    badge: "bg-muted text-muted-foreground border-border",
+    row: "border-l-2 border-l-transparent",
+  },
+};
+
+interface AlertQueueProps {
+  items: QueueItem[];
+  selectedEventId: string | null;
+  onSelect: (eventId: string) => void;
+}
+
+export function AlertQueue({ items, selectedEventId, onSelect }: AlertQueueProps) {
+  return (
+    <div className="flex flex-col h-full">
+      {/* Panel header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
+        <span className="text-sm font-semibold">Alert Queue</span>
+        {items.length > 0 && (
+          <Badge variant="secondary" className="text-xs tabular-nums">
+            {items.length}
+          </Badge>
+        )}
+      </div>
+
+      {items.length === 0 ? (
+        <EmptyState
+          icon={CheckCircle2}
+          title="No active alerts"
+          description="The network is clear. New events will appear here."
+          className="flex-1"
+        />
+      ) : (
+        <ScrollArea className="flex-1">
+          <div className="divide-y divide-border">
+            {/* Column headers */}
+            <div className="grid grid-cols-[auto_1fr_auto_auto] gap-2 items-center px-4 py-2 text-xs font-medium text-muted-foreground sticky top-0 bg-background/95 backdrop-blur-sm z-10">
+              <span>Priority</span>
+              <span>Corridor</span>
+              <span className="text-right">RCI</span>
+              <span className="text-right">P(cls)</span>
+            </div>
+
+            {items.map((item) => {
+              const config = PRIORITY_CONFIG[item.alert_priority] ?? PRIORITY_CONFIG.LOW;
+              const isSelected = item.event_id === selectedEventId;
+
+              return (
+                <button
+                  key={item.event_id}
+                  onClick={() => onSelect(item.event_id)}
+                  className={cn(
+                    "w-full grid grid-cols-[auto_1fr_auto_auto] gap-2 items-center px-4 py-3",
+                    "text-left transition-colors duration-150 cursor-pointer",
+                    "hover:bg-accent",
+                    config.row,
+                    isSelected && "bg-primary/8 dark:bg-primary/12 hover:bg-primary/12"
+                  )}
+                >
+                  <Badge
+                    variant="outline"
+                    className={cn("text-[10px] px-1.5 py-0.5 font-medium shrink-0", config.badge)}
+                  >
+                    {config.label}
+                  </Badge>
+                  <span className="text-sm truncate min-w-0">
+                    {item.corridor ?? "Non-corridor"}
+                  </span>
+                  <span className="text-right font-mono text-xs text-muted-foreground tabular-nums">
+                    {item.rci.toFixed(2)}
+                  </span>
+                  <span className="text-right font-mono text-xs text-muted-foreground tabular-nums">
+                    {item.p_closure.toFixed(2)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </ScrollArea>
+      )}
+    </div>
+  );
+}

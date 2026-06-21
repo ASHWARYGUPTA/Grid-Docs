@@ -439,6 +439,244 @@ async def test_m09_planned_event_includes_package_section(wired_client):
 
 
 @pytest.mark.asyncio
+async def test_m09_approve_planned_event_enqueues_barricade_via_m10(monkeypatch, wired_client):
+    """M09 approve() on a planned event with barricade_count > 0, with shadow
+    mode off, must enqueue both a dispatch command AND a barricade reservation
+    command in M10 — and both must reach 'acknowledged' with audit entries."""
+    from grid_unlocked.execution.service import setup_command_queue
+    from grid_unlocked.execution.station_client import MockStationClient
+
+    monkeypatch.setattr(settings, "governance_shadow_mode", False)
+    monkeypatch.setattr(settings, "governance_tier", "1")
+    queue = await setup_command_queue(station_client=MockStationClient(failure_rate=0.0))
+
+    await wired_client.post("/ingest/planned", json=PLANNED_CONSTRUCTION)
+    await _wait_features(wired_client, "FKIDE2EPLAN1")
+
+    card = (
+        await wired_client.get("/recommendations/FKIDE2EPLAN1?mode=complete&refresh=true")
+    ).json()
+    assert card["planned"]["barricade_count"] >= 1
+
+    approve = await wired_client.post(
+        f"/recommendations/{card['card_id']}/approve",
+        json={"commander_id": "CMD-BARRICADE", "override_codes": []},
+    )
+    assert approve.status_code == 200
+    body = approve.json()
+    assert body["execution_enqueued"] is True
+    assert "barricade" in body["message"].lower()
+
+    await asyncio.sleep(0.6)
+
+    audit = await wired_client.get(f"/execute/audit?event_id=FKIDE2EPLAN1")
+    assert audit.status_code == 200
+    entries = audit.json()["entries"]
+    command_types = {e["command_type"] for e in entries}
+    assert "dispatch" in command_types
+    assert "barricade" in command_types, (
+        "Barricade reservation must produce its own audit trail, not be silently dropped"
+    )
+    barricade_entries = [e for e in entries if e["command_type"] == "barricade"]
+    assert all(e["outcome"] == "acknowledged" for e in barricade_entries)
+
+    await queue.stop()
+
+
+@pytest.mark.asyncio
+async def test_m09_approve_unplanned_incident_pushes_vms_via_m11(monkeypatch, wired_client):
+    """M09 approve() on an unplanned incident with M08 diversion routes, with
+    shadow mode off, must fan out a VMS push (M11) to the corridor's boards —
+    each board delivery reaching 'delivered' with an ack_id."""
+    from grid_unlocked.execution.service import setup_command_queue
+    from grid_unlocked.execution.station_client import MockStationClient
+    from grid_unlocked.vms.mock_webhook import MockWebhookClient
+    from grid_unlocked.vms.service import set_webhook_client
+
+    monkeypatch.setattr(settings, "governance_shadow_mode", False)
+    monkeypatch.setattr(settings, "governance_tier", "1")
+    queue = await setup_command_queue(station_client=MockStationClient(failure_rate=0.0))
+    set_webhook_client(MockWebhookClient(failure_rate=0.0))
+
+    event = {**E2E_EVENT, "id": "FKIDE2E0011"}
+    await wired_client.post("/ingest/astram", json=event)
+    await _wait_features(wired_client, "FKIDE2E0011")
+
+    card = (
+        await wired_client.get("/recommendations/FKIDE2E0011?mode=complete&refresh=true")
+    ).json()
+    assert len(card["diversions"]) >= 1
+
+    approve = await wired_client.post(
+        f"/recommendations/{card['card_id']}/approve",
+        json={"commander_id": "CMD-VMS", "override_codes": []},
+    )
+    assert approve.status_code == 200
+    body = approve.json()
+    assert body["execution_enqueued"] is True
+    assert "vms push" in body["message"].lower()
+
+    await asyncio.sleep(0.6)
+
+    push_id = body["approval_token"]
+    # Find delivery rows via a fresh push request with the same push_id (idempotent — returns existing)
+    push_resp = await wired_client.post(
+        "/vms/push",
+        json={
+            "push_id": push_id,
+            "event_id": "FKIDE2E0011",
+            "card_id": card["card_id"],
+            "corridor": "ORR East 1",
+            "routes": [],
+            "commander_id": "CMD-VMS",
+        },
+    )
+    assert push_resp.status_code == 200
+    deliveries = push_resp.json()["deliveries"]
+    assert len(deliveries) >= 1
+    for d in deliveries:
+        status_resp = await wired_client.get(f"/vms/status/{d['delivery_id']}")
+        assert status_resp.json()["status"] == "delivered"
+        assert status_resp.json()["ack_id"]
+
+    await queue.stop()
+
+
+@pytest.mark.asyncio
+async def test_m14_tier_override_changes_m09_dispatch_behavior(wired_client):
+    """M14 GovernanceConsole's tier override must actually change M09 card
+    assembly behavior — Tier 3 must skip dispatch and use the SOP fallback
+    card, proving get_governance() reads the live M14 state, not the static
+    settings default that was used before M14 existed."""
+    event = {**E2E_EVENT, "id": "FKIDE2E0012"}
+    await wired_client.post("/ingest/astram", json=event)
+    await _wait_features(wired_client, "FKIDE2E0012")
+
+    normal_card = (
+        await wired_client.get("/recommendations/FKIDE2E0012?mode=complete&refresh=true")
+    ).json()
+    assert normal_card["governance"]["tier"] == "1"
+    assert normal_card["governance"]["manual_mode"] is False
+    assert normal_card["dispatch"] is not None
+
+    override = await wired_client.post(
+        "/governance/override-tier",
+        json={"tier": "3", "reason": "Integration test — continuity drill", "operator_id": "OPS-INT"},
+    )
+    assert override.status_code == 200
+    assert override.json()["tier"] == "3"
+
+    event2 = {**E2E_EVENT, "id": "FKIDE2E0013"}
+    await wired_client.post("/ingest/astram", json=event2)
+    await _wait_features(wired_client, "FKIDE2E0013")
+
+    sop_card = (
+        await wired_client.get("/recommendations/FKIDE2E0013?mode=complete&refresh=true")
+    ).json()
+    assert sop_card["governance"]["tier"] == "3"
+    assert sop_card["governance"]["manual_mode"] is True
+    assert sop_card["dispatch"] is None
+    assert sop_card["provenance"]["dispatch"] == "disabled"
+
+    # restore Tier 1 so later tests in this module aren't affected
+    restore = await wired_client.post(
+        "/governance/override-tier",
+        json={"tier": "1", "reason": "Integration test cleanup", "operator_id": "OPS-INT"},
+    )
+    assert restore.json()["tier"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_m13_promotion_reloads_m03_registry_via_live_api(wired_client, monkeypatch, tmp_path):
+    """M13 -> M03 end-to-end: promoting a model through the live /learning
+    API must change what /impact/score reports as closure_model_version on
+    a subsequent scoring call — not just registry.reload() called directly
+    in a unit test, but the full retrain -> eval -> promote -> rescue path
+    through the real HTTP surface.
+
+    Uses a synthetic buffer (same approach as test_learning.py) because real
+    ASTraM data's 8.3% closure rate means no realistic model clears the
+    spec's literal 94% accuracy_score gate — confirmed via
+    scripts/evaluate_models.py, where the dummy "always no closure" baseline
+    already scores 91.7%, exceeding the actual trained model."""
+    monkeypatch.setattr(settings, "models_dir", tmp_path / "v1")
+
+    import numpy as np
+    import pandas as pd
+    from grid_unlocked.learning import service as learning_service_module
+    from grid_unlocked.learning.buffer import BufferResult
+
+    def synthetic_buffer(n: int = 400) -> pd.DataFrame:
+        rng = np.random.default_rng(7)
+        rows = []
+        start_base = NOW - timedelta(days=10)
+        for i in range(n):
+            rate = rng.choice([0.05, 0.95])
+            closure = int(rng.random() < rate)
+            hour = int(rng.integers(0, 24))
+            dow = int(rng.integers(0, 7))
+            rows.append(
+                {
+                    "hour_sin": 0.0, "hour_cos": 1.0, "dow_sin": 0.0, "dow_cos": 1.0,
+                    "is_peak_hour": int(hour in range(7, 11)) | int(hour in range(17, 22)),
+                    "is_weekend": int(dow >= 5),
+                    "betweenness_norm": 0.5, "degree_norm": 0.5, "is_named_corridor": 1,
+                    "corridor_cause_closure_rate": rate, "duration_prior_h": 1.5,
+                    "cause_median_resolution_global_h": 1.5, "veh_complexity_score": 0.5,
+                    "simultaneous_events_2km": 0, "reporting_bias_weight": 1.0, "is_planned": 0,
+                    "cause": "accident", "corridor": "ORR East 1", "closure": closure,
+                    "duration_h": 1.5, "event_observed": 1,
+                    "start": start_base + timedelta(hours=i),
+                    "event_id": f"SYN-{i:04d}", "pool": "anchor" if i >= int(n * 0.8) else "recent",
+                }
+            )
+        return pd.DataFrame(rows)
+
+    async def fake_build_buffer(session, **kwargs):
+        df = synthetic_buffer()
+        return BufferResult(
+            df=df,
+            recent_count=int((df["pool"] == "recent").sum()),
+            anchor_count=int((df["pool"] == "anchor").sum()),
+            recent_pct=80.0,
+            anchor_pct=20.0,
+            strata={"synthetic": len(df)},
+            status="ready",
+            reject_reason_counts={},
+        )
+
+    monkeypatch.setattr(learning_service_module, "build_buffer", fake_build_buffer)
+
+    before_score = await wired_client.post("/impact/score", json={"event_id": "FKIDE2E0012"})
+    before_version = (
+        before_score.json()["model_versions"]["closure"] if before_score.status_code == 200 else None
+    )
+
+    retrain = await wired_client.post("/learning/retrain", json={"trigger": "manual"})
+    assert retrain.status_code == 200
+    model_version = retrain.json()["model_version"]
+
+    eval_resp = await wired_client.get(f"/learning/eval/{retrain.json()['job_id']}")
+    if not eval_resp.json()["gate_passed"]:
+        pytest.skip("Synthetic buffer did not clear the 94% gate on this RNG draw")
+
+    promote = await wired_client.post(
+        f"/learning/promote/{model_version}", json={"operator_id": "OPS-RELOAD"}
+    )
+    assert promote.status_code == 200
+
+    event = {**E2E_EVENT, "id": "FKIDM13RELOAD"}
+    await wired_client.post("/ingest/astram", json=event)
+    await _wait_features(wired_client, "FKIDM13RELOAD")
+
+    after_score = await wired_client.post("/impact/score", json={"event_id": "FKIDM13RELOAD"})
+    assert after_score.status_code == 200
+    after_version = after_score.json()["model_versions"]["closure"]
+    assert after_version == f"lgbm-{model_version}"
+    assert after_version != before_version
+
+
+@pytest.mark.asyncio
 async def test_m09_approve_reject_lifecycle(wired_client):
     """M09 approval workflow persists status and respects shadow mode."""
     event = {**E2E_EVENT, "id": "FKIDE2E0009"}

@@ -39,6 +39,7 @@ CAUSE_ALIASES: dict[str, str] = {
     "road_conditions": "road_conditions",
     "test_demo": "test_demo",
     "tree_fall": "tree_fall",
+    "unknown_obstruction": "unknown_obstruction",
     "vehicle_breakdown": "vehicle_breakdown",
     "vip_movement": "vip_movement",
     "water_logging": "water_logging",

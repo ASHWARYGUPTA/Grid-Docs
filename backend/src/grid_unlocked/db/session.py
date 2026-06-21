@@ -8,14 +8,20 @@ from grid_unlocked.db.models import (  # noqa: F401 — register all tables with
     ApprovalRecordRow,
     Base,
     CausePriorRow,
+    CitizenReportRow,
     CorridorCausePriorRow,
+    CorridorCentroidRow,
+    CorridorSubscriptionRow,
     DispatchRecommendationRow,
     FeatureSnapshotRow,
+    FieldAcknowledgementRow,
+    FieldClosureRow,
     HourBiasWeightRow,
     ImpactScoreRow,
     IngestRejectRow,
     NormalizedEventRow,
     PlannedPackageRow,
+    TransitImpactCacheRow,
 )
 
 engine = create_async_engine(settings.database_url, echo=False)

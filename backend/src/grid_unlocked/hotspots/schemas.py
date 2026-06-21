@@ -34,6 +34,8 @@ class PredictedZoneForecast(BaseModel):
     expected_count: float
     baseline_count: float
     lift_pct: float
+    centroid_lat: float | None = None
+    centroid_lon: float | None = None
 
 
 class PredictedHotspotsResponse(BaseModel):
@@ -59,6 +61,20 @@ class AnomaliesResponse(BaseModel):
     window_hours: int = 24
 
 
+class CellDensityPoint(BaseModel):
+    h3_res7: str
+    centroid_lat: float
+    centroid_lon: float
+    count: int
+
+
+class DensityHotspotsResponse(BaseModel):
+    cells: list[CellDensityPoint]
+    refreshed_at: str
+    latency_ms: float
+    source: str = "historical_all_cells"
+
+
 class CellHistorySummary(BaseModel):
     h3_res7: str
     total_events: int
@@ -66,5 +82,6 @@ class CellHistorySummary(BaseModel):
     persistence_score: float
     top_causes: list[dict[str, int | str]]
     top_corridors: list[dict[str, int | str]]
+    hourly_counts: list[int] = Field(default_factory=lambda: [0] * 24)
     centroid_lat: float
     centroid_lon: float

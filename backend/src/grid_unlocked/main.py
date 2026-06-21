@@ -1,16 +1,58 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from grid_unlocked.config import settings
 from grid_unlocked.db.session import SessionLocal, get_session, init_db
+from grid_unlocked.execution.service import setup_command_queue
+from grid_unlocked.execution.queue import get_command_queue
 from grid_unlocked.features.router import router as features_router
 from grid_unlocked.features.service import FeatureService
 from grid_unlocked.features.subscriber import register_feature_subscribers
+from grid_unlocked.governance.service import GovernanceService
 from grid_unlocked.ingestion.router import events_router, health_router, router
 from grid_unlocked.redis_client import close_redis, ping_redis
+
+logger = logging.getLogger(__name__)
+
+# M14 — health probe cycle interval (spec: "probe cycle 30 s")
+_GOVERNANCE_PROBE_INTERVAL_S = 30
+
+# M17 — pre-alert matcher poll interval (spec test: "within 10s of M05 update")
+_CITIZEN_PRE_ALERT_INTERVAL_S = 10
+
+
+async def _governance_probe_loop() -> None:
+    """Background task: re-evaluate automatic tier transitions every 30s."""
+    while True:
+        try:
+            await asyncio.sleep(_GOVERNANCE_PROBE_INTERVAL_S)
+            async with SessionLocal() as session:
+                await GovernanceService(session).evaluate_auto_transition()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("M14 governance probe cycle failed")
+
+
+async def _citizen_pre_alert_loop() -> None:
+    """Background task: poll M05/M04 state and fan out CitizenPreAlerts every 10s."""
+    while True:
+        try:
+            await asyncio.sleep(_CITIZEN_PRE_ALERT_INTERVAL_S)
+            async with SessionLocal() as session:
+                from grid_unlocked.citizen.service import CitizenService
+
+                await CitizenService(session).check_pre_alerts()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("M17 citizen pre-alert cycle failed")
 
 
 @asynccontextmanager
@@ -31,7 +73,36 @@ async def lifespan(_: FastAPI):
     async with SessionLocal() as session:
         service = FeatureService(session)
         await service.ensure_priors_seeded()
+
+    # M17 — seed corridor centroid lookup from the ASTraM CSV
+    async with SessionLocal() as session:
+        from grid_unlocked.citizen.centroid_seed import (
+            centroids_need_seed,
+            seed_corridor_centroids_from_csv,
+        )
+
+        if await centroids_need_seed(session):
+            await seed_corridor_centroids_from_csv(session)
+
+    # M14 — seed governance_state from settings defaults and warm the cache
+    async with SessionLocal() as session:
+        await GovernanceService(session).bootstrap()
+    probe_task = asyncio.create_task(_governance_probe_loop(), name="m14-governance-probe")
+
+    # M17 — start citizen pre-alert poll loop
+    pre_alert_task = asyncio.create_task(
+        _citizen_pre_alert_loop(), name="m17-citizen-pre-alert"
+    )
+
+    # M10 — start background command queue worker
+    queue = await setup_command_queue()
+
     yield
+
+    # M10 — graceful shutdown
+    await queue.stop()
+    probe_task.cancel()
+    pre_alert_task.cancel()
     await close_redis()
 
 
@@ -46,9 +117,16 @@ async def _check_db(session: AsyncSession) -> bool:
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
-        description="Grid Unlocked API — M01–M09 (Ingestion through Recommendations)",
-        version="0.9.0",
+        description="Grid Unlocked API — M01–M11, M13, M14 (Ingestion through VMSRouter, plus ReplayLearningService + GovernanceConsole)",
+        version="1.0.0",
         lifespan=lifespan,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors_allow_origins),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     app.include_router(router)
     app.include_router(events_router)
@@ -77,6 +155,33 @@ def create_app() -> FastAPI:
     from grid_unlocked.recommendations.router import router as recommendations_router
 
     app.include_router(recommendations_router)
+    from grid_unlocked.execution.router import mock_router as execution_mock_router, router as execution_router
+
+    app.include_router(execution_router)
+    app.include_router(execution_mock_router)
+    from grid_unlocked.vms.router import mock_router as vms_mock_router, router as vms_router
+
+    app.include_router(vms_router)
+    app.include_router(vms_mock_router)
+    from grid_unlocked.transit.router import mock_router as transit_mock_router, router as transit_router
+
+    app.include_router(transit_router)
+    app.include_router(transit_mock_router)
+    from grid_unlocked.governance.router import router as governance_router
+
+    app.include_router(governance_router)
+    from grid_unlocked.learning.router import router as learning_router
+
+    app.include_router(learning_router)
+    from grid_unlocked.dashboard.router import router as dashboard_router
+
+    app.include_router(dashboard_router)
+    from grid_unlocked.citizen.router import router as citizen_router
+
+    app.include_router(citizen_router)
+    from grid_unlocked.field.router import router as field_router
+
+    app.include_router(field_router)
 
     @app.get("/health", tags=["health"])
     async def system_health() -> dict:

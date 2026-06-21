@@ -5,6 +5,7 @@ from grid_unlocked.db.session import get_session
 from grid_unlocked.hotspots.schemas import (
     AnomaliesResponse,
     CellHistorySummary,
+    DensityHotspotsResponse,
     ObservedHotspotsResponse,
     PredictedHotspotsResponse,
 )
@@ -28,6 +29,14 @@ async def hotspots_predicted(
     service: HotspotService = Depends(_service),
 ) -> PredictedHotspotsResponse:
     return await service.get_predicted(horizon_hours)
+
+
+@router.get("/density", response_model=DensityHotspotsResponse)
+async def hotspots_density(
+    min_count: int = Query(default=1, ge=1),
+    service: HotspotService = Depends(_service),
+) -> DensityHotspotsResponse:
+    return service.get_density(min_count)
 
 
 @router.get("/anomalies", response_model=AnomaliesResponse)

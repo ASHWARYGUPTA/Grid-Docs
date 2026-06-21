@@ -158,12 +158,12 @@ Modules communicate via REST (sync), WebSocket (dashboard), and event bus (async
 | M14      | `GET /governance/tier`                | All modules          | `tier: 1|2|3`, feature flags, shadow_mode                            |
 | M14      | `POST /governance/override-tier`      | M15                  | Manual tier transition with audit                                    |
 | M15      | WebSocket `dashboard.delta`           | Browser clients      | Event cards, map layers, tier badge                                  |
-| M16      | `GET /field/packet/{assignment_id}`   | Mobile clients       | Route, hazards, ICT quantiles, navigation deep link                  |
+| M16      | `GET /field/packet/{assignment_id}`   | Web clients (responsive) | Route, hazards, ICT quantiles, navigation deep link              |
 | M17      | `POST /citizen/report`                | M18, M01, M15        | photo_ref, lat/lon, cause_hint, ict_p50/p80, h3_cell, corridor       |
 | M17      | `POST /citizen/verify/{report_id}`    | M01, M09             | Commander auth → promotes to normalized event                        |
 | M17      | Event: `CitizenReportSubmitted`       | M15, M18             | report_id, location snap, ICT quote, authenticated=false             |
 | M18      | `POST /citizen/subscribe`             | M17                  | corridor or H3 cells for pre-alert fanout                            |
-| M18      | WebSocket `citizen.alert`             | Browser/mobile       | Hotspot/propagation pre-notification payload                         |
+| M18      | WebSocket `citizen.alert`             | Browser (responsive) | Hotspot/propagation pre-notification payload                          |
 
 
 ### 2.3 Data Entities (Summary)
@@ -1307,7 +1307,7 @@ M10 consumes approval events from M09 and fires commands to police station APIs 
 
 - VMS routing (M11)
 - Recommendation generation
-- Officer mobile UI (M16 displays status only)
+- Officer web UI (M16 displays status only)
 
 #### Further Notes
 
@@ -1706,7 +1706,7 @@ M15 is the web command dashboard consuming M09 action cards, M05 hotspots, M14 g
 
 #### Out of Scope
 
-- Field officer mobile layout (M16)
+- Field officer responsive layout (M16)
 - ASTraM native UI replacement
 - Full ASTraM citizen app replacement (fines, violations) — M18 is report + pre-alert only
 
@@ -1724,7 +1724,7 @@ Field officers need assignment packets within seconds: route, hazard profile, IC
 
 #### Solution
 
-M16 is the mobile-optimized field interface consuming M09/M07 outputs. Displays assignment packet, navigation deep link, tier status, and closure form capturing actual resources for replay buffer.
+M16 is a mobile-responsive page within the Grid Unlocked Next.js web application (not a native mobile app) consuming M09/M07 outputs. Displays assignment packet, navigation deep link, tier status, and closure form capturing actual resources for replay buffer.
 
 #### User Stories
 
@@ -1746,18 +1746,18 @@ M16 is the mobile-optimized field interface consuming M09/M07 outputs. Displays 
 - `GET /field/packet/{assignment_id}` — assignment bundle
 - `POST /field/ack/{assignment_id}` — officer acknowledgement
 - `POST /field/close/{event_id}` — `{ closed_datetime, barricades_used, officers_used, diversion_activated, notes }`
-- `GET /field/tier` — proxy to M14 for mobile badge
+- `GET /field/tier` — proxy to M14 for tier badge
 
 **Core algorithms:**
 
 - Packet assembly from M07 `DispatchRecommendation` + M03 quantiles + M08 top diversion
-- Offline: service worker caches last packet; closure queues for sync
+- Offline: Next.js service worker caches last packet; closure queues for sync
 - Closure form validation: barricades_used ≥0 integer; officers_used ≥1
 
 **Storage/read models:**
 
 - `field_closures` → forwarded to M01 as `EventClosed` enrichment
-- Mobile local storage for offline queue
+- Browser local storage for offline queue
 
 **Dependencies:** M09, M07, M03, M14, M01 (closure sync)
 
@@ -1883,7 +1883,7 @@ Commuters need a lightweight interface to report congestion with a photo, see es
 
 #### Solution
 
-M18 is a mobile-first PWA consuming M17 for report submission and ICT display, M05 for nearby hotspot context, and M04/M05-driven pre-alerts via WebSocket. Hackathon MVP uses responsive web; Phase 1.5 can embed as ASTraM WebView tab.
+M18 is a mobile-responsive page within the Grid Unlocked Next.js web application (not a native mobile app) consuming M17 for report submission and ICT display, M05 for nearby hotspot context, and M04/M05-driven pre-alerts via WebSocket.
 
 #### User Stories
 
@@ -1968,7 +1968,7 @@ Implements readme.md commuter vision: photo report + pre-notification. Demo beat
 | M13    | Buffer manifest screenshot + 94% gate            | Analyst tab shows 80/20 proof                   |
 | M14    | Tier badge + shadow mode on                      | Toggle Tier 2 live in demo                      |
 | M15    | Full command dashboard                           | Primary judge UI                                |
-| M16    | Field packet on mobile viewport                  | Officer closes event with barricade count       |
+| M16    | Field packet on responsive web viewport          | Officer closes event with barricade count       |
 | M17    | Citizen report API + ICT quote                   | Backend for photo/GPS ingest                    |
 | M18    | Citizen PWA report + pre-alert                   | Commuter submits photo; sees clearance estimate |
 

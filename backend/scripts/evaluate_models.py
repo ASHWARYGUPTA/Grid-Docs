@@ -18,9 +18,7 @@ from grid_unlocked.config import settings
 from grid_unlocked.impact.feature_matrix import FEATURE_COLUMNS
 from grid_unlocked.impact.rci import compute_rci, ict_bands_from_median
 from grid_unlocked.features.schemas import FeatureVector
-import sys
-sys.path.append(str(Path(__file__).resolve().parent))
-from train_impact_models import load_training_frame, apply_encoders, IST
+from grid_unlocked.learning.training_core import IST, apply_encoders, load_csv_frame as load_training_frame
 
 def expected_calibration_error(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -> float:
     bin_boundaries = np.linspace(0, 1, n_bins + 1)

@@ -19,9 +19,13 @@ RUN uv sync --frozen --no-dev
 # Static data
 COPY data /app/data
 
+# M03 trained ML artifacts (closure classifier + ICT survival model)
+COPY backend/models /app/backend/models
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/backend/src \
-    GRID_ASTRAM_CSV_PATH=/app/data/astram_events.csv
+    GRID_ASTRAM_CSV_PATH=/app/data/astram_events.csv \
+    GRID_MODELS_DIR=/app/backend/models/v1
 
 EXPOSE 8000
 
