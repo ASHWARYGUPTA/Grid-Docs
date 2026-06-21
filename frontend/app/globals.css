@@ -185,3 +185,33 @@
 .animate-live {
   animation: live-pulse 1.8s ease-in-out infinite;
 }
+
+/* Landing page — slow-drifting aurora blobs behind the hero */
+@keyframes aurora-drift-1 {
+  0%, 100% { transform: translate(0%, 0%) scale(1); }
+  33%      { transform: translate(8%, -10%) scale(1.15); }
+  66%      { transform: translate(-6%, 6%) scale(0.95); }
+}
+@keyframes aurora-drift-2 {
+  0%, 100% { transform: translate(0%, 0%) scale(1); }
+  33%      { transform: translate(-10%, 8%) scale(1.1); }
+  66%      { transform: translate(6%, -8%) scale(0.92); }
+}
+@keyframes aurora-drift-3 {
+  0%, 100% { transform: translate(0%, 0%) scale(1); }
+  50%      { transform: translate(5%, 5%) scale(1.08); }
+}
+.animate-aurora-1 {
+  animation: aurora-drift-1 22s ease-in-out infinite;
+}
+.animate-aurora-2 {
+  animation: aurora-drift-2 26s ease-in-out infinite;
+}
+.animate-aurora-3 {
+  animation: aurora-drift-3 19s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-aurora-1, .animate-aurora-2, .animate-aurora-3 {
+    animation: none;
+  }
+}

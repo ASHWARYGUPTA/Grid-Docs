@@ -10,16 +10,16 @@ import { TourProvider } from "@/components/onboarding-tour";
 /**
  * ClientShell — handles auth gating, sidebar layout, and onboarding tour.
  *
- * - /login  → renders children directly (no sidebar, no auth check)
- * - other   → if unauthenticated, redirects to /login
- *             if authenticated, wraps children in sidebar shell + tour provider
+ * - /, /login  → renders children directly (no sidebar, no auth check)
+ * - other      → if unauthenticated, redirects to /login
+ *                if authenticated, wraps children in sidebar shell + tour provider
  */
 export function ClientShell({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
 
-  const isPublicRoute = pathname === "/login";
+  const isPublicRoute = pathname === "/login" || pathname === "/";
 
   useEffect(() => {
     if (!loading && !user && !isPublicRoute) {
