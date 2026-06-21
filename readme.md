@@ -65,6 +65,16 @@ pnpm install
 pnpm dev   # http://localhost:3000/live, expects the API at NEXT_PUBLIC_API_URL (.env)
 ```
 
+## Deploying the frontend to Vercel
+
+The backend is hosted separately (e.g. Render); the frontend is deployed to Vercel pointed at it.
+
+1. In the Vercel dashboard, import this repo and set **Root Directory** to `frontend` (this is a monorepo — Vercel needs to know the Next.js app isn't at the repo root).
+2. `frontend/vercel.json` and `frontend/.env.production` are already committed and pre-configured for `https://grid-docs.onrender.com`. `NEXT_PUBLIC_API_URL`/`NEXT_PUBLIC_WS_URL` are not secrets (they're inlined into the client bundle at build time), so `.env.production` ships as-is — no dashboard env vars needed for those two.
+3. **`NEXT_PUBLIC_MAPPLS_KEY` must be set in the Vercel dashboard** (Project Settings → Environment Variables), not committed — Mappls whitelists keys per-domain, and that domain has to match your live Vercel URL. `NEXT_PUBLIC_MAPTILER_KEY` can go there too if you use it.
+4. After your first deploy, copy the assigned Vercel URL (e.g. `https://your-project.vercel.app`) and set it as `GRID_CORS_ALLOW_ORIGINS=["https://your-project.vercel.app"]` on the **backend** host (Render) — the API's CORS allowlist defaults to `localhost:3000` only and will reject the deployed frontend's origin until this is set. Restart/redeploy the backend after setting it.
+5. If you use Vercel preview deployments (one URL per PR/branch), add each preview origin to the same `GRID_CORS_ALLOW_ORIGINS` list, or switch to Vercel's stable production domain only for the allowlist.
+
 ## Documentation
 
 | Document | Description |

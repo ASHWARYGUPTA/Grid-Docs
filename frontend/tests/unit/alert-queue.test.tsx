@@ -26,7 +26,7 @@ describe("AlertQueue", () => {
     ];
     render(<AlertQueue items={items} selectedEventId={null} onSelect={() => {}} />);
 
-    const rows = screen.getAllByRole("row").slice(1); // skip header row
+    const rows = screen.getAllByRole("button").filter((el) => el.textContent?.includes("Corridor"));
     expect(rows[0]).toHaveTextContent("Corridor A");
     expect(rows[1]).toHaveTextContent("Corridor B");
     expect(rows[2]).toHaveTextContent("Corridor C");
@@ -34,7 +34,7 @@ describe("AlertQueue", () => {
 
   it("shows an empty state when there are no active events", () => {
     render(<AlertQueue items={[]} selectedEventId={null} onSelect={() => {}} />);
-    expect(screen.getByText("No active events")).toBeInTheDocument();
+    expect(screen.getByText("No active alerts")).toBeInTheDocument();
   });
 
   it("calls onSelect with the event_id when a row is clicked", () => {

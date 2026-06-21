@@ -33,20 +33,22 @@ export function InfoPopover({
 }: InfoPopoverProps) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          role="button"
-          tabIndex={0}
-          className={cn(
-            "inline-flex items-center justify-center size-4 rounded-full",
-            "text-muted-foreground/60 hover:text-muted-foreground transition-colors",
-            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-default",
-            className
-          )}
-          aria-label={`About: ${title}`}
-        >
-          <Info className="size-3.5" />
-        </span>
+      <TooltipTrigger
+        render={
+          <span
+            role="button"
+            tabIndex={0}
+            className={cn(
+              "inline-flex items-center justify-center size-4 rounded-full",
+              "text-muted-foreground/60 hover:text-muted-foreground transition-colors",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-default",
+              className
+            )}
+            aria-label={`About: ${title}`}
+          />
+        }
+      >
+        <Info className="size-3.5" />
       </TooltipTrigger>
       <TooltipContent
         side={side}

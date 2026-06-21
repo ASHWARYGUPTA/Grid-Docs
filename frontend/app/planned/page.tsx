@@ -626,7 +626,7 @@ function AddEditDialog({
               {/* Cause */}
               <div className="space-y-1.5">
                 <Label className="text-xs">Cause <span className="text-destructive">*</span></Label>
-                <Select value={form.cause} onValueChange={(v) => set("cause", v)}>
+                <Select value={form.cause} onValueChange={(v) => v && set("cause", v)}>
                   <SelectTrigger className="h-8 text-sm">
                     <SelectValue placeholder="Select cause…" />
                   </SelectTrigger>
