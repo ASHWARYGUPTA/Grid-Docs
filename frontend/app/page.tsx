@@ -160,7 +160,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-5xl px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <LayoutGrid className="size-4" />
-            <span>Grid Unlocked — M01–M18 implemented</span>
+            <span>Grid Unlocked — all 18 planned modules implemented</span>
           </div>
           <div className="flex items-center gap-4">
             <Button

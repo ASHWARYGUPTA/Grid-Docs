@@ -9,3 +9,6 @@ __pycache__/
 backend/*.db
 backend/.venv/
 .venv/
+
+# ML research scratch space — datasets/notebooks/figures for model testing (not production)
+research/

@@ -34,7 +34,7 @@ const TOUR_STEPS: TourStep[] = [
     targetId: null,
     title: "Welcome to Grid Unlocked",
     description:
-      "This is the M15 Command Dashboard — the real-time control centre for Bengaluru's traffic management. It pulls live data from sensors, AI dispatch engines, and field units. Let's walk through the key sections in under 2 minutes.",
+      "This is the Command Dashboard — the real-time control centre for Bengaluru's traffic management. It pulls live data from sensors, AI dispatch engines, and field units. Let's walk through the key sections in under 2 minutes.",
   },
   {
     targetId: "tour-sidebar-nav",
@@ -89,7 +89,7 @@ const TOUR_STEPS: TourStep[] = [
     route: "/governance",
     title: "Module health",
     description:
-      "M01 (data ingestion), M02 (feature graph), and M03 (ML impact engine) are the three critical modules. If M01+M02 go down, the system drops to Tier 3. If only M03 goes down, it drops to Tier 2 and uses rule-based scoring instead of the ML model — this is NOT a critical failure.",
+      "Three critical systems keep this dashboard running: data ingestion (pulls in new incidents), the feature store (prepares data for the AI), and the impact engine (the ML model that scores risk). If data ingestion and the feature store both go down, the system drops to Tier 3 (manual mode). If only the impact engine goes down, it drops to Tier 2 and falls back to rule-based scoring instead of the ML model — this is NOT a critical failure.",
     placement: "right",
   },
   {

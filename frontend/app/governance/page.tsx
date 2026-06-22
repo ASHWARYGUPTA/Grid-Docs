@@ -80,17 +80,28 @@ const TIER_CONFIG: Record<Tier, {
   },
   "2": {
     label: "Tier 2 — Constrained",
-    description: "Greedy fallback dispatch + rule-based scoring. Triggered automatically when ML model (M03) is unavailable.",
+    description: "Simplified fallback dispatch + rule-based scoring. Triggered automatically when the AI impact model is unavailable.",
     badge: "bg-warn/10 text-warn border-warn/30",
     icon: ShieldAlert,
   },
   "3": {
     label: "Tier 3 — Manual SOP",
-    description: "Static BTP SOP templates + manual command mode only. Triggered when ingestion (M01) + feature store (M02) are both down.",
+    description: "Static standard-procedure templates + manual command mode only. Triggered when data ingestion and the feature store are both down.",
     badge: "bg-destructive/10 text-destructive border-destructive/30",
     icon: Shield,
   },
 };
+
+// Backend sends internal codes (e.g. "M01_Ingestion") — map to plain names for display.
+const MODULE_DISPLAY_NAMES: Record<string, string> = {
+  M01_Ingestion: "Data Ingestion",
+  M02_Features: "Feature Store",
+  M03_Impact: "AI Impact Engine",
+};
+
+function moduleDisplayName(code: string): string {
+  return MODULE_DISPLAY_NAMES[code] ?? code;
+}
 
 const STATUS_CONFIG: Record<string, { dot: string; badgeClass: string; label: string }> = {
   healthy:  { dot: "bg-live",         badgeClass: "bg-live/10 text-live border-live/30",               label: "healthy" },
@@ -248,8 +259,8 @@ function TierControlPanel() {
 
         {/* Auto-transition rules explanation */}
         <div className="text-[10px] text-muted-foreground flex flex-wrap gap-x-4 gap-y-0.5 pt-1">
-          <span>Auto: M01+M02 down → Tier 3</span>
-          <span>Auto: M03 down → Tier 2</span>
+          <span>Auto: data ingestion + feature store both down → Tier 3</span>
+          <span>Auto: AI impact model down → Tier 2</span>
           <span>Auto: healthy ≥5 min → recovery</span>
           <span>Manual override takes precedence until healthy ≥5 min</span>
         </div>
@@ -295,12 +306,12 @@ function HealthPanel() {
         <StatCard title="Degraded / Down" value={`${degradedCount} / ${downCount}`} icon={XCircle} description="Requiring attention" valueClassName={downCount > 0 ? "text-destructive" : degradedCount > 0 ? "text-warn" : "text-live"} />
       </div>
 
-      {/* M03 rule-fallback note */}
+      {/* AI impact model rule-fallback note */}
       {health.modules.some((m) => m.module.includes("M03") && m.status === "down") && (
         <div className="flex items-start gap-2 text-xs rounded-md border border-warn/30 bg-warn/8 px-3 py-2.5 text-warn">
           <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
           <span>
-            <strong>M03 Impact</strong> shows "down" because ML models are not loaded. The system is still functional — 
+            <strong>AI Impact Engine</strong> shows "down" because its ML models are not loaded. The system is still functional —
             it's running rule-based fallback scoring (Tier 2 behavior). This is not a critical failure.
           </span>
         </div>
@@ -316,7 +327,7 @@ function HealthPanel() {
             Module Health
             <InfoPopover
               title="Module Health"
-              description="M01 = data ingestion, M02 = feature graph, M03 = ML impact engine. M01+M02 both down → Tier 3. Only M03 down → Tier 2 (rule fallback). Click a row to see detailed metrics."
+              description="These are the dashboard's core systems: data ingestion pulls in new incidents, the feature store prepares data for the AI, and the impact engine scores risk with ML models. If ingestion and the feature store both go down, the system drops to Tier 3 (manual mode). If only the impact engine goes down, it drops to Tier 2 (rule-based fallback). Click a row to see detailed metrics."
               side="right"
             />
           </CardTitle>
@@ -360,7 +371,7 @@ function HealthPanel() {
                             : <ChevronRight className="size-3 text-muted-foreground" />
                         )}
                       </TableCell>
-                      <TableCell className="font-medium text-sm">{m.module}</TableCell>
+                      <TableCell className="font-medium text-sm">{moduleDisplayName(m.module)}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5">
                           <span className={cn("size-1.5 rounded-full shrink-0", cfg.dot)} />
@@ -565,8 +576,8 @@ function DrillsPanel() {
         <CardContent className="py-4">
           <p className="text-xs text-muted-foreground font-medium mb-2">Auto-transition rules (for reference)</p>
           <div className="space-y-1.5 text-xs text-muted-foreground">
-            <div className="flex items-start gap-2"><span className="text-destructive font-medium w-20 shrink-0">→ Tier 3</span><span>Ingestion (M01) AND feature store (M02) both down simultaneously</span></div>
-            <div className="flex items-start gap-2"><span className="text-warn font-medium w-20 shrink-0">→ Tier 2</span><span>Impact model (M03) down — greedy dispatch + rule-based scoring takes over</span></div>
+            <div className="flex items-start gap-2"><span className="text-destructive font-medium w-20 shrink-0">→ Tier 3</span><span>Data ingestion AND the feature store both down simultaneously</span></div>
+            <div className="flex items-start gap-2"><span className="text-warn font-medium w-20 shrink-0">→ Tier 2</span><span>AI impact model down — simplified dispatch + rule-based scoring takes over</span></div>
             <div className="flex items-start gap-2"><span className="text-live font-medium w-20 shrink-0">→ Tier 1</span><span>All modules healthy for ≥5 consecutive minutes (hysteresis prevents flapping)</span></div>
           </div>
         </CardContent>
@@ -812,7 +823,7 @@ export default function GovernancePage() {
               </div>
               <div className="rounded-lg border border-warn/30 bg-warn/5 px-3 py-2.5">
                 <p className="font-semibold text-warn mb-1">Tier 2 — Rule-based</p>
-                <p className="text-muted-foreground leading-relaxed">The ML model (M03) or live data APIs are partially down. The AI switches to simpler rule-based scoring instead. Recommendations are less precise but still reliable. Usually recovers automatically.</p>
+                <p className="text-muted-foreground leading-relaxed">The AI impact model or live data APIs are partially down. The AI switches to simpler rule-based scoring instead. Recommendations are less precise but still reliable. Usually recovers automatically.</p>
               </div>
               <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5">
                 <p className="font-semibold text-destructive mb-1">Tier 3 — Manual SOP</p>

@@ -65,7 +65,7 @@ export default function LoginPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Grid Unlocked</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">M15 Command Dashboard</p>
+            <p className="text-sm text-muted-foreground mt-0.5">Command Dashboard</p>
           </div>
         </div>
 

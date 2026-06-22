@@ -79,52 +79,74 @@ def build_feature_rows(rows: list[dict]) -> pd.DataFrame:
     the live DB's recent-closed pool + CSV anchor sample when called from
     M13's buffer construction. This is what makes a buffer-based retrain
     meaningfully different from re-running the static CLI script.
+
+    Priors are computed as **time-ordered expanding (past-only) statistics**:
+    each row only sees outcomes from rows with an earlier `start` timestamp,
+    falling back to the global default constants for the first occurrence of
+    any (corridor, cause) pair or cause. This avoids a training-time leak
+    where a row's prior is built from outcomes — including its own and future
+    rows' — that would not actually be known yet at that row's incident-start
+    time in production (whole-population aggregation leaks the future into
+    the past and inflates offline eval metrics vs true online performance).
     """
-    cc_agg: dict[tuple[str, str], list[dict]] = defaultdict(list)
-    cause_agg: dict[str, list[dict]] = defaultdict(list)
+    ordered = sorted(range(len(rows)), key=lambda i: rows[i]["start"])
+
     hour_counts: dict[int, int] = defaultdict(int)
-
     for r in rows:
-        record = {"closure": r["closure"], "ict": r["duration_h"] if not pd.isna(r["duration_h"]) else None}
-        cc_agg[(r["corridor"], r["cause"])].append(record)
-        cause_agg[r["cause"]].append(record)
         hour_counts[r["start"].astimezone(IST).hour] += 1
-
     median_hour = statistics.median(hour_counts.values()) if hour_counts else 1
     bias_weights = {
         h: min(3.0, max(0.5, median_hour / max(hour_counts.get(h, 0), 1))) for h in range(24)
     }
 
-    cc_stats: dict[tuple[str, str], tuple[float, float]] = {}
-    for key, records in cc_agg.items():
-        closures = [r["closure"] for r in records]
-        icts = [r["ict"] for r in records if r["ict"] is not None]
-        cc_stats[key] = (
-            sum(closures) / len(closures) if closures else DEFAULT_PRIOR_CLOSURE_RATE,
-            statistics.median(icts) if icts else DEFAULT_PRIOR_ICT_H,
+    # running (expanding) sums, keyed by (corridor, cause) and by cause alone
+    cc_closure_sum: dict[tuple[str, str], int] = defaultdict(int)
+    cc_closure_n: dict[tuple[str, str], int] = defaultdict(int)
+    cc_icts: dict[tuple[str, str], list[float]] = defaultdict(list)
+    cause_icts: dict[str, list[float]] = defaultdict(list)
+
+    cc_rate_prior: dict[int, float] = {}
+    cc_ict_prior: dict[int, float] = {}
+    cause_ict_prior: dict[int, float] = {}
+
+    for idx in ordered:
+        r = rows[idx]
+        cc_key = (r["corridor"], r["cause"])
+
+        n = cc_closure_n[cc_key]
+        cc_rate_prior[idx] = (
+            cc_closure_sum[cc_key] / n if n > 0 else DEFAULT_PRIOR_CLOSURE_RATE
+        )
+        cc_icts_so_far = cc_icts[cc_key]
+        cc_ict_prior[idx] = (
+            statistics.median(cc_icts_so_far) if cc_icts_so_far else DEFAULT_PRIOR_ICT_H
+        )
+        cause_icts_so_far = cause_icts[r["cause"]]
+        cause_ict_prior[idx] = (
+            statistics.median(cause_icts_so_far) if cause_icts_so_far else DEFAULT_PRIOR_ICT_H
         )
 
-    cause_medians: dict[str, float] = {}
-    for c, recs in cause_agg.items():
-        icts = [r["ict"] for r in recs if r["ict"] is not None]
-        cause_medians[c] = statistics.median(icts) if icts else DEFAULT_PRIOR_ICT_H
+        # only now fold this row's own outcome into the running stats, so the
+        # NEXT row in time order (not this one) is the first to see it
+        cc_closure_sum[cc_key] += r["closure"]
+        cc_closure_n[cc_key] += 1
+        if not pd.isna(r["duration_h"]):
+            cc_icts[cc_key].append(r["duration_h"])
+            cause_icts[r["cause"]].append(r["duration_h"])
 
     built: list[dict] = []
-    for r in rows:
+    for idx, r in enumerate(rows):
         temporal = _temporal(r["start"])
         betweenness, degree_norm, _ = corridor_centrality(r["corridor"])
-        cc_rate, cc_ict = cc_stats.get(
-            (r["corridor"], r["cause"]), (DEFAULT_PRIOR_CLOSURE_RATE, DEFAULT_PRIOR_ICT_H)
-        )
         built.append(
             {
                 **temporal,
                 "betweenness_norm": betweenness,
                 "degree_norm": degree_norm,
                 "is_named_corridor": int(r["corridor"] in CORRIDOR_CENTRALITY),
-                "corridor_cause_closure_rate": cc_rate,
-                "duration_prior_h": cc_ict,
-                "cause_median_resolution_global_h": cause_medians.get(r["cause"], DEFAULT_PRIOR_ICT_H),
+                "corridor_cause_closure_rate": cc_rate_prior[idx],
+                "duration_prior_h": cc_ict_prior[idx],
+                "cause_median_resolution_global_h": cause_ict_prior[idx],
                 "veh_complexity_score": _veh_score(r["veh_type"]),
                 "simultaneous_events_2km": 0,
                 "reporting_bias_weight": bias_weights[temporal["hour_ist"]],
@@ -135,6 +157,7 @@ def build_feature_rows(rows: list[dict]) -> pd.DataFrame:
                 "duration_h": r["duration_h"],
                 "event_observed": r["event_observed"],
                 "start": r["start"],
+                "censor_time": r.get("censor_time", r["start"]),
                 "event_id": r.get("event_id"),
                 "pool": r.get("pool", "anchor"),
             }
@@ -174,6 +197,17 @@ def load_csv_frame(csv_path: Path) -> pd.DataFrame:
             ict = _ict_hours(start, closed)
             is_planned = row.get("event_type") == "planned"
 
+            # Censoring horizon for rows with no closed_datetime: the last
+            # timestamp we actually observed the row at (modified_datetime,
+            # falling back to created_date, then start itself). Used by
+            # train_cox_model so censored rows carry their true observed
+            # window instead of a corridor x cause prior (see that function).
+            censor_time = (
+                parse_datetime(row.get("modified_datetime"))
+                or parse_datetime(row.get("created_date"))
+                or start
+            )
+
             rows.append(
                 {
                     "cause": cause,
@@ -184,6 +218,7 @@ def load_csv_frame(csv_path: Path) -> pd.DataFrame:
                     "event_observed": int(ict is not None),
                     "veh_type": row.get("veh_type"),
                     "start": start,
+                    "censor_time": censor_time,
                     "event_id": row.get("id"),
                     "pool": "anchor",
                 }
@@ -256,9 +291,26 @@ def train_closure_model(
 
 
 def train_cox_model(df: pd.DataFrame) -> CoxPHFitter:
-    cox_df = df[FEATURE_COLUMNS + ["duration_h", "event_observed"]].copy()
-    cox_df["duration_h"] = cox_df["duration_h"].fillna(cox_df["duration_prior_h"])
+    """
+    Fit Cox PH on true survival semantics: an observed row's duration is its
+    real elapsed start->closed time; a censored row's duration is its real
+    elapsed start->censor_time (last time we actually observed it, e.g.
+    modified_datetime), NOT the corridor x cause prior. Filling censored
+    durations with the prior pins them to a population median instead of
+    their true (noisier) observed window, which understates duration
+    variance and previously inflated the model's offline C-index relative to
+    how it performs on genuinely-unknown future incidents.
+    """
+    cox_df = df[FEATURE_COLUMNS + ["duration_h", "event_observed", "start"]].copy()
+    if "censor_time" in df.columns:
+        censor_h = (df["censor_time"] - df["start"]).dt.total_seconds() / 3600.0
+    else:
+        censor_h = pd.Series(0.0, index=df.index)
+    cox_df["duration_h"] = cox_df["duration_h"].where(
+        cox_df["event_observed"] == 1, censor_h
+    )
     cox_df["duration_h"] = cox_df["duration_h"].clip(lower=0.05)
+    cox_df = cox_df.drop(columns="start")
 
     use_cols = [c for c in FEATURE_COLUMNS if cox_df[c].nunique() > 1]
     fit_cols = use_cols + ["duration_h", "event_observed"]

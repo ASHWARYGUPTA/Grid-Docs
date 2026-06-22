@@ -19,7 +19,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Grid Unlocked — Command Dashboard",
-  description: "M15 Command Dashboard — Primary TMC UI for real-time traffic management",
+  description: "Command Dashboard — the primary control-room interface for real-time traffic management",
 };
 
 export default function RootLayout({
