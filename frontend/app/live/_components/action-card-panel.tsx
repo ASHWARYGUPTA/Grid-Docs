@@ -1,8 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Info, MousePointerClick } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  History,
+  Info,
+  MousePointerClick,
+  Sparkles,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,10 +37,31 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { api } from "@/lib/api";
-import type { ActionCard } from "@/lib/types";
+import { enqueueClosure } from "@/lib/field-offline-queue";
+import { validateClosure } from "@/app/field/[recommendationId]/_components/closure-form";
+import type {
+  ActionCard,
+  CardStatus,
+  ClosureRequest,
+  LatestJobResponse,
+  TransitImpactIndex,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const COMMANDER_ID = "CMD-DASHBOARD";
+
+// "Close & Learn" is offered on cards whose event is still live (not rejected):
+// closing re-ingests the event as `closed`, which feeds the M13 replay buffer.
+export function canCloseAndLearn(status: CardStatus): boolean {
+  return status === "complete" || status === "approved" || status === "executed";
+}
+
+// What we show after a closure so the operator can see the learning loop fire.
+interface LearningSignal {
+  queuedOffline: boolean;
+  job: LatestJobResponse | null;
+  bufferCount: number | null;
+}
 
 const REJECT_REASON_CODES = [
   "MODEL_DISAGREE",
@@ -56,6 +84,55 @@ export function ActionCardPanel({ card, loading, onMutated, onHoverRoute }: Acti
   const [reasonCode, setReasonCode] = useState(REJECT_REASON_CODES[0]);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Tabs are controlled so the Transit panel can lazy-load on first open.
+  const [activeTab, setActiveTab] = useState("impact");
+  const [transit, setTransit] = useState<TransitImpactIndex | null>(null);
+  const [transitState, setTransitState] = useState<"idle" | "loading" | "error">("idle");
+
+  // Close & Learn dialog + resulting learning signal.
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [barricadesUsed, setBarricadesUsed] = useState(0);
+  const [officersUsed, setOfficersUsed] = useState(1);
+  const [diversionActivated, setDiversionActivated] = useState(false);
+  const [closeNotes, setCloseNotes] = useState("");
+  const [closing, setClosing] = useState(false);
+  const [learningSignal, setLearningSignal] = useState<LearningSignal | null>(null);
+
+  const cardEventId = card?.event_id ?? null;
+
+  // Reset per-card UI when the selected event changes.
+  useEffect(() => {
+    setActiveTab("impact");
+    setTransit(null);
+    setTransitState("idle");
+    setCloseOpen(false);
+    setLearningSignal(null);
+  }, [cardEventId]);
+
+  // Lazy-load M12 transit impact when the Transit tab is opened. Deps are kept to
+  // [activeTab, cardEventId] only: adding transitState/transit would re-run the
+  // effect the instant it flips to "loading", and that re-run's cleanup would
+  // abandon the in-flight request (via `active`) before it ever resolves.
+  useEffect(() => {
+    if (activeTab !== "transit" || !cardEventId) return;
+    let active = true;
+    setTransitState("loading");
+    api
+      .transitImpact(cardEventId)
+      .then((res) => {
+        if (active) {
+          setTransit(res);
+          setTransitState("idle");
+        }
+      })
+      .catch(() => {
+        if (active) setTransitState("error");
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeTab, cardEventId]);
 
   if (loading) {
     return (
@@ -123,6 +200,52 @@ export function ActionCardPanel({ card, loading, onMutated, onHoverRoute }: Acti
     }
   }
 
+  // After a closure, pull the latest M13 retrain job + buffer size so the
+  // commander can see the learning loop has been fed.
+  async function surfaceLearningSignal(queuedOffline: boolean) {
+    const job = await api.latestLearningJob().catch(() => null);
+    let bufferCount: number | null = null;
+    if (job) {
+      const manifest = await api.learningManifest(job.job_id).catch(() => null);
+      if (manifest) bufferCount = manifest.recent_count + manifest.anchor_count;
+    }
+    setLearningSignal({ queuedOffline, job, bufferCount });
+  }
+
+  async function handleClose() {
+    const v = validateClosure(barricadesUsed, officersUsed);
+    if (!v.valid) {
+      toast.error(v.barricadesError ?? v.officersError ?? "Invalid closure input");
+      return;
+    }
+    const request: ClosureRequest = {
+      closed_datetime: new Date().toISOString(),
+      barricades_used: barricadesUsed,
+      officers_used: officersUsed,
+      diversion_activated: diversionActivated,
+      notes: closeNotes || null,
+      officer_id: COMMANDER_ID,
+    };
+    setClosing(true);
+    try {
+      await api.fieldClose(card!.event_id, request);
+      toast.success("Event closed — feeds the M13 replay buffer");
+      setCloseOpen(false);
+      onMutated();
+      await surfaceLearningSignal(false);
+    } catch {
+      // Mirror the field app: never lose a closure — queue it for later sync.
+      enqueueClosure(card!.event_id, request);
+      toast.warning("Closure queued — will sync when back online");
+      setCloseOpen(false);
+      setLearningSignal({ queuedOffline: true, job: null, bufferCount: null });
+    } finally {
+      setClosing(false);
+    }
+  }
+
+  const closeValidation = validateClosure(barricadesUsed, officersUsed);
+
   return (
     <Card className="border-0 rounded-none h-full flex flex-col">
       <CardHeader className="pb-3 shrink-0">
@@ -159,11 +282,12 @@ export function ActionCardPanel({ card, loading, onMutated, onHoverRoute }: Acti
 
       <ScrollArea className="flex-1 min-h-0">
         <CardContent className="pb-4">
-          <Tabs defaultValue="impact">
-            <TabsList className="w-full grid grid-cols-4 h-8">
+          <Tabs value={activeTab} onValueChange={(v) => v && setActiveTab(v as string)}>
+            <TabsList className="w-full grid grid-cols-5 h-8">
               <TabsTrigger value="impact" className="text-xs">Impact</TabsTrigger>
               <TabsTrigger value="propagation" className="text-xs">Cascade</TabsTrigger>
               <TabsTrigger value="diversions" className="text-xs">Routes</TabsTrigger>
+              <TabsTrigger value="transit" className="text-xs">Transit</TabsTrigger>
               <TabsTrigger value="evidence" className="text-xs">Evidence</TabsTrigger>
             </TabsList>
 
@@ -260,6 +384,86 @@ export function ActionCardPanel({ card, loading, onMutated, onHoverRoute }: Acti
                     )}
                   </div>
                 ))
+              )}
+            </TabsContent>
+
+            <TabsContent value="transit" className="space-y-2 mt-3">
+              {transitState === "loading" && (
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-2/3" />
+                  <Skeleton className="h-16 w-full" />
+                </div>
+              )}
+              {transitState === "error" && (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  Transit impact unavailable for this event.
+                </p>
+              )}
+              {transitState === "idle" && transit && (
+                <>
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">Passenger delay index</span>
+                      <span className="font-mono font-medium">
+                        {transit.passenger_delay_index.toFixed(2)}
+                      </span>
+                    </div>
+                    <Progress
+                      value={Math.min(transit.passenger_delay_index * 100, 100)}
+                      className="h-1.5"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">Transfer overload risk</span>
+                      <span className="font-mono font-medium">
+                        {transit.transfer_overload_risk.toFixed(2)}
+                      </span>
+                    </div>
+                    <Progress
+                      value={Math.min(transit.transfer_overload_risk * 100, 100)}
+                      className="h-1.5"
+                    />
+                  </div>
+
+                  <Separator />
+
+                  {transit.advisory_message && (
+                    <p className="text-xs text-muted-foreground">{transit.advisory_message}</p>
+                  )}
+
+                  {transit.affected_routes.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-2">
+                      No affected BMTC routes.
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-muted-foreground">
+                        Affected BMTC routes ({transit.affected_routes.length})
+                      </p>
+                      {transit.affected_routes.map((r) => (
+                        <div key={r.route_id} className="rounded-md border p-2 space-y-0.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-medium">{r.name}</p>
+                            <Badge variant="secondary" className="text-xs shrink-0">
+                              +{r.predicted_delay_min.toFixed(0)} min
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            {(r.overlap_fraction * 100).toFixed(0)}% corridor overlap · occupancy{" "}
+                            {r.occupancy}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {transit.advisory_only && (
+                    <p className="text-[11px] text-muted-foreground italic">
+                      Advisory only — not an enforcement action.
+                    </p>
+                  )}
+                </>
               )}
             </TabsContent>
 
@@ -363,6 +567,138 @@ export function ActionCardPanel({ card, loading, onMutated, onHoverRoute }: Acti
               </DialogContent>
             </Dialog>
           </div>
+
+          {/* Close & Learn — commander-side closure that feeds the M13 buffer */}
+          {canCloseAndLearn(card.status) && (
+            <Dialog open={closeOpen} onOpenChange={setCloseOpen}>
+              <DialogTrigger
+                render={<Button variant="outline" className="w-full mt-2 gap-1.5" />}
+              >
+                <History className="size-4" />
+                Close &amp; Learn
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Close {card.event_id}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <p className="text-xs text-muted-foreground">
+                    Closing re-ingests this event as{" "}
+                    <span className="font-mono">closed</span> and feeds the M13
+                    replay buffer used for the next retrain.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="close-barricades">Barricades used</Label>
+                      <input
+                        id="close-barricades"
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={barricadesUsed}
+                        onChange={(e) => setBarricadesUsed(Number(e.target.value))}
+                        className="w-full rounded-md border bg-transparent px-3 py-1.5 text-sm"
+                      />
+                      {closeValidation.barricadesError && (
+                        <p className="text-xs text-destructive">
+                          {closeValidation.barricadesError}
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="close-officers">Officers used</Label>
+                      <input
+                        id="close-officers"
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={officersUsed}
+                        onChange={(e) => setOfficersUsed(Number(e.target.value))}
+                        className="w-full rounded-md border bg-transparent px-3 py-1.5 text-sm"
+                      />
+                      {closeValidation.officersError && (
+                        <p className="text-xs text-destructive">
+                          {closeValidation.officersError}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={diversionActivated}
+                      onChange={(e) => setDiversionActivated(e.target.checked)}
+                    />
+                    Diversion activated
+                  </label>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="close-notes">Notes</Label>
+                    <Textarea
+                      id="close-notes"
+                      rows={3}
+                      value={closeNotes}
+                      onChange={(e) => setCloseNotes(e.target.value)}
+                      placeholder="Closure context for the learning loop…"
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setCloseOpen(false)}
+                    disabled={closing}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleClose}
+                    disabled={closing || !closeValidation.valid}
+                  >
+                    {closing ? "Closing…" : "Confirm closure"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
+
+          {/* Learning-loop signal after a successful (or queued) closure */}
+          {learningSignal && (
+            <div className="mt-4 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-medium">
+                <Sparkles className="size-3.5 text-primary" />
+                Learning loop
+              </div>
+              {learningSignal.queuedOffline ? (
+                <p className="text-xs text-muted-foreground">
+                  Closure queued offline — it will feed the M13 replay buffer once it
+                  syncs.
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Closure recorded. This event now feeds the M13 replay buffer for the
+                    next retrain.
+                  </p>
+                  {learningSignal.job ? (
+                    <div className="space-y-0.5">
+                      <Row label="Latest retrain job" value={learningSignal.job.job_id} />
+                      <Row label="Job status" value={learningSignal.job.status} />
+                      {learningSignal.bufferCount != null && (
+                        <Row
+                          label="Buffer samples"
+                          value={String(learningSignal.bufferCount)}
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      No retrain job has run yet.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </CardContent>
       </ScrollArea>
     </Card>

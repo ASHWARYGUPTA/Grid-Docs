@@ -28,6 +28,7 @@ import type {
   SubscriptionRequest,
   SubscriptionResponse,
   TierTransitionsResponse,
+  TransitImpactIndex,
   PromotionChecklistResponse,
   PromotionApproveResponse,
 } from "./types";
@@ -92,7 +93,8 @@ export const api = {
 
   corridors: () => request<CorridorsResponse>(`/api/v1/corridors`),
 
-  transitImpact: (eventId: string) => request<unknown>(`/transit/impact/${eventId}`),
+  transitImpact: (eventId: string) =>
+    request<TransitImpactIndex>(`/transit/impact/${eventId}`),
 
   governanceTier: () => request<GovernanceTierResponse>("/governance/tier"),
 
