@@ -182,6 +182,9 @@ def create_app() -> FastAPI:
     from grid_unlocked.field.router import router as field_router
 
     app.include_router(field_router)
+    from grid_unlocked.maps.router import router as maps_router
+
+    app.include_router(maps_router)
 
     @app.get("/health", tags=["health"])
     async def system_health() -> dict:
