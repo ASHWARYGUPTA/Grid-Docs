@@ -66,6 +66,9 @@ async def lifespan(_: FastAPI):
     from grid_unlocked.hotspots.subscriber import register_hotspot_subscribers
 
     register_hotspot_subscribers()
+    from grid_unlocked.dashboard.incident_subscriber import register_incident_subscribers
+
+    register_incident_subscribers()
     registry.load()
     from grid_unlocked.hotspots.service import HotspotService
 
