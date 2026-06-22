@@ -365,6 +365,30 @@ export interface CorridorsResponse {
   corridors: CorridorCentroid[];
 }
 
+// M12 TransitImpactService — mirrors backend transit/schemas.py
+export interface TransitAffectedRoute {
+  route_id: string;
+  name: string;
+  occupancy: number;
+  predicted_delay_min: number;
+  overlap_fraction: number;
+}
+
+export interface TransitImpactIndex {
+  event_id: string;
+  corridor: string | null;
+  tier: string;
+  degraded: boolean;
+  advisory_only: boolean;
+  passenger_delay_index: number;
+  transfer_overload_risk: number;
+  affected_routes: TransitAffectedRoute[];
+  advisory_message: string | null;
+  cached: boolean;
+  latency_ms: number;
+  generated_at: string;
+}
+
 export interface ScenarioResponse {
   event_id: string;
   corridor: string | null;
