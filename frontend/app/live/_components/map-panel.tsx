@@ -29,7 +29,13 @@ const INCIDENT_PIN_HTML = (color: string) => `
   <div style="width:16px;height:16px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,0.25)"></div>`;
 
 const BENGALURU_CENTER: MapplsLngLat = { lat: 12.9716, lng: 77.5946 };
-const MAP_CONTAINER_ID = "mappls-live-map";
+// Every MapPanel mount gets its own container id rather than a fixed one.
+// The previous instance's WebGL context/canvas isn't guaranteed to be fully
+// released by the time a remount's init effect runs (observed in the wild
+// as `eglCreateContext: Requested version is not supported` on the second
+// context request) — a fresh id rules out the SDK ever attaching a second
+// map instance onto a stale canvas it didn't create.
+let mapContainerSeq = 0;
 
 const MAPPLS_KEY = process.env.NEXT_PUBLIC_MAPPLS_KEY;
 const MAPPLS_SDK_URL = `https://sdk.mappls.com/map/sdk/web?v=3.0&access_token=${MAPPLS_KEY}`;
@@ -155,7 +161,14 @@ interface MapPanelProps {
 export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank }: MapPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapplsMap | null>(null);
-  const [sdkReady, setSdkReady] = useState(false);
+  const containerIdRef = useRef(`mappls-live-map-${++mapContainerSeq}`);
+  // next/script dedupes by `src` and only fires `onReady` once globally, so
+  // navigating away from /live and back mounts a fresh MapPanel against an
+  // already-loaded script — the onReady callback below never fires again,
+  // leaving sdkReady stuck false until a full page reload re-runs
+  // everything. Seeding from window.mappls (already set by the earlier
+  // load) avoids that stuck state.
+  const [sdkReady, setSdkReady] = useState(() => typeof window !== "undefined" && !!window.mappls);
   const [mapLoaded, setMapLoaded] = useState(false);
   const heatmapLayerIdRef = useRef<string | null>(null);
   const clusterMarkersRef = useRef<MapplsMarker[]>([]);
@@ -189,7 +202,7 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank }: 
     // Mappls's Map constructor only initializes correctly given a container
     // *id string* — passing the element directly silently returns a
     // near-empty, non-functional instance with no map-specific methods.
-    const map = new window.mappls.Map(MAP_CONTAINER_ID, {
+    const map = new window.mappls.Map(containerIdRef.current, {
       center: BENGALURU_CENTER,
       zoom: 11,
     });
@@ -208,7 +221,18 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank }: 
       incidentMarkersRef.current.forEach((m) => m.remove());
       incidentMarkersRef.current.clear();
       diversionLayerIdsRef.current = [];
-      map.remove();
+      // Deliberately NOT calling map.remove() here. It's the SDK's own
+      // teardown call (loaded from a CDN script, not introspectable), and
+      // it schedules some deferred internal work that throws asynchronously
+      // ("Cannot read properties of undefined (reading 'destroy')",
+      // surfacing from the SDK's own minified source) once the container
+      // DOM node is already gone — a try/catch around the call site can't
+      // catch that, since the throw happens on a later tick, not
+      // synchronously inside this function. Abandoning the instance instead
+      // (disconnect our own listeners/observers, null our ref, let GC
+      // reclaim it) avoids the crash. Each mount uses a unique container id
+      // (see containerIdRef above), so an abandoned instance can never
+      // collide with the next mount's map.
       mapRef.current = null;
     };
   }, [sdkReady]);
@@ -539,8 +563,8 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank }: 
 
     if (map.getLayer(CASCADE_EDGE_LAYER_ID)) map.removeLayer(CASCADE_EDGE_LAYER_ID);
     if (map.getLayer(CASCADE_NODE_LAYER_ID)) map.removeLayer(CASCADE_NODE_LAYER_ID);
-    map.removeSource(CASCADE_EDGE_SOURCE_ID);
-    map.removeSource(CASCADE_NODE_SOURCE_ID);
+    if (map.getSource(CASCADE_EDGE_SOURCE_ID)) map.removeSource(CASCADE_EDGE_SOURCE_ID);
+    if (map.getSource(CASCADE_NODE_SOURCE_ID)) map.removeSource(CASCADE_NODE_SOURCE_ID);
 
     if (!showCascade || !selectedCard) return;
 
@@ -672,7 +696,7 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank }: 
         onReady={() => setSdkReady(true)}
         onError={() => setSdkLoadFailed(true)}
       />
-      <div ref={containerRef} id={MAP_CONTAINER_ID} className="h-full w-full" />
+      <div ref={containerRef} id={containerIdRef.current} className="h-full w-full" />
       <div className="absolute top-2 left-2 flex gap-1 bg-background/90 rounded-md p-1 border">
         <Button
           size="sm"

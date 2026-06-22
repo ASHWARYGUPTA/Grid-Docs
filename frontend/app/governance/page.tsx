@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/context/auth-context";
 import { can } from "@/lib/auth";
 import { toast } from "sonner";
@@ -358,9 +358,8 @@ function HealthPanel() {
                 const hasMetrics = Object.keys(m.metrics ?? {}).length > 0;
                 const isExpanded = expanded.has(m.module);
                 return (
-                  <>
+                  <Fragment key={m.module}>
                     <TableRow
-                      key={m.module}
                       className={cn(hasMetrics && "cursor-pointer hover:bg-muted/40")}
                       onClick={() => hasMetrics && toggleExpanded(m.module)}
                     >
@@ -381,7 +380,7 @@ function HealthPanel() {
                       <TableCell className="text-xs text-muted-foreground">{m.detail}</TableCell>
                     </TableRow>
                     {isExpanded && hasMetrics && (
-                      <TableRow key={`${m.module}-metrics`}>
+                      <TableRow>
                         <TableCell colSpan={4} className="py-2 px-6 bg-muted/30">
                           <div className="flex flex-wrap gap-x-6 gap-y-1">
                             {Object.entries(m.metrics).map(([k, v]) => (
@@ -394,7 +393,7 @@ function HealthPanel() {
                         </TableCell>
                       </TableRow>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
             </TableBody>
