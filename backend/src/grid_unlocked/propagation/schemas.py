@@ -23,6 +23,8 @@ class PropagationNode(BaseModel):
     risk: float
     hop: int
     parent_edge: str | None = None
+    lat: float | None = None
+    lng: float | None = None
 
 
 class PropagationMap(BaseModel):

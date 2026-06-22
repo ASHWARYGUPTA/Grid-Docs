@@ -1,7 +1,9 @@
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from grid_unlocked.citizen.repository import CitizenRepository
 from grid_unlocked.config import settings
+from grid_unlocked.features.graph_stub import parse_node_id
 from grid_unlocked.features.service import FeatureService
 from grid_unlocked.impact.registry import registry
 from grid_unlocked.propagation.cache import propagation_cache
@@ -13,6 +15,26 @@ class PropagationService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.features = FeatureService(session)
+        self.citizen_repo = CitizenRepository(session)
+
+    async def _centroid_map(self) -> dict[str, tuple[float, float]]:
+        centroids = await self.citizen_repo.get_all_centroids()
+        return {name: (lat, lon) for (name, lat, lon) in centroids}
+
+    @staticmethod
+    def _enrich_map(
+        pmap: PropagationMap, centroid_map: dict[str, tuple[float, float]]
+    ) -> PropagationMap:
+        enriched_nodes = []
+        for node in pmap.nodes:
+            corridor = node.corridor or parse_node_id(node.node_id)
+            point = centroid_map.get(corridor) if corridor else None
+            if point is None:
+                enriched_nodes.append(node)
+                continue
+            lat, lon = point
+            enriched_nodes.append(node.model_copy(update={"lat": lat, "lng": lon}))
+        return pmap.model_copy(update={"nodes": enriched_nodes})
 
     def default_params(self, max_hops: int | None = None, epsilon: float | None = None) -> GcdhParams:
         return GcdhParams(
@@ -54,10 +76,15 @@ class PropagationService:
             params=params,
         )
         await propagation_cache.set(pmap)
-        return pmap
+        centroid_map = await self._centroid_map()
+        return self._enrich_map(pmap, centroid_map)
 
     async def get_active(self) -> list[PropagationMap]:
-        return await propagation_cache.list_active()
+        active = await propagation_cache.list_active()
+        if not active:
+            return active
+        centroid_map = await self._centroid_map()
+        return [self._enrich_map(p, centroid_map) for p in active]
 
     async def on_event_closed(self, event_id: str) -> None:
         await propagation_cache.delete(event_id)
