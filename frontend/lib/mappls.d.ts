@@ -14,6 +14,23 @@ interface MapplsMapOptions {
   zoom?: number;
 }
 
+// Minimal MapLibre GL JS style-spec types needed for addLayer/addSource
+// below — kept local rather than importing maplibre-gl's own types because
+// this file declares global ambients (no module imports allowed) and only
+// the `line` layer / `geojson` source shapes are actually used.
+interface MapplsGeoJsonSourceSpec {
+  type: "geojson";
+  data: GeoJSON.FeatureCollection | GeoJSON.Feature;
+}
+
+interface MapplsStyleLayerSpec {
+  id: string;
+  type: "line" | "circle";
+  source: string;
+  paint?: Record<string, unknown>;
+  layout?: Record<string, unknown>;
+}
+
 declare class MapplsMap {
   // Must be a container element *id string* — passing an HTMLElement
   // directly silently returns a non-functional instance (verified at
@@ -26,6 +43,18 @@ declare class MapplsMap {
   addListener(event: "load" | "click", handler: () => void): void;
   getLayer(id: string): unknown | undefined;
   removeLayer(id: string): void;
+  // addLayer/addSource/removeSource are NOT Mappls-specific — this SDK
+  // wraps MapLibre GL JS internally (the existing getLayer/removeLayer
+  // above already prove that), so these are the real MapLibre GL JS Map
+  // methods, signature-checked against node_modules/maplibre-gl's own
+  // .d.ts. Unlike Marker/HeatmapLayer (Mappls-authored, runtime-verified
+  // against the live SDK because their behaviour doesn't match their
+  // docs), these are plain MapLibre — no Mappls quirks to verify.
+  addSource(id: string, source: MapplsGeoJsonSourceSpec): void;
+  removeSource(id: string): void;
+  getSource(id: string): { setData(data: GeoJSON.FeatureCollection | GeoJSON.Feature): void } | undefined;
+  addLayer(layer: MapplsStyleLayerSpec): void;
+  setPaintProperty(layerId: string, name: string, value: unknown): void;
   remove(): void;
   resize(): void;
 }

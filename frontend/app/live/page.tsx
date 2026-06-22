@@ -18,6 +18,7 @@ export default function LivePage() {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [card, setCard] = useState<ActionCard | null>(null);
   const [cardLoading, setCardLoading] = useState(false);
+  const [highlightedRouteRank, setHighlightedRouteRank] = useState<number | null>(null);
   const { lastDelta, connected } = useDashboardSocket();
 
   const loadQueue = useCallback(() => {
@@ -55,6 +56,7 @@ export default function LivePage() {
 
   useEffect(() => {
     if (selectedEventId) loadCard(selectedEventId);
+    setHighlightedRouteRank(null);
   }, [selectedEventId, loadCard]);
 
   // Patch the queue + selected card in place when a matching delta arrives,
@@ -97,7 +99,11 @@ export default function LivePage() {
 
         {/* Column 2 — Map */}
         <div id="tour-live-map" className="flex-1 relative overflow-hidden">
-          <MapPanel selectedCard={card} />
+          <MapPanel
+            selectedCard={card}
+            onSelectEvent={setSelectedEventId}
+            highlightedRouteRank={highlightedRouteRank}
+          />
         </div>
 
         {/* Column 3 — Action card */}
@@ -125,6 +131,7 @@ export default function LivePage() {
                 loadQueue();
                 if (selectedEventId) loadCard(selectedEventId);
               }}
+              onHoverRoute={setHighlightedRouteRank}
             />
           </div>
         </div>

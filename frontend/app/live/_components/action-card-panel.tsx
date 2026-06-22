@@ -46,9 +46,12 @@ interface ActionCardPanelProps {
   card: ActionCard | null;
   loading: boolean;
   onMutated: () => void;
+  // Cross-highlights a diversion route with its line on the map — fired on
+  // hover/unhover of a route row; null clears the highlight.
+  onHoverRoute?: (rank: number | null) => void;
 }
 
-export function ActionCardPanel({ card, loading, onMutated }: ActionCardPanelProps) {
+export function ActionCardPanel({ card, loading, onMutated, onHoverRoute }: ActionCardPanelProps) {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reasonCode, setReasonCode] = useState(REJECT_REASON_CODES[0]);
   const [notes, setNotes] = useState("");
@@ -232,6 +235,8 @@ export function ActionCardPanel({ card, loading, onMutated }: ActionCardPanelPro
                 card.diversions.map((route) => (
                   <div
                     key={route.rank}
+                    onMouseEnter={() => onHoverRoute?.(route.rank)}
+                    onMouseLeave={() => onHoverRoute?.(null)}
                     className={cn(
                       "rounded-md border p-3 space-y-1",
                       "transition-colors hover:bg-accent/50"
@@ -248,6 +253,11 @@ export function ActionCardPanel({ card, loading, onMutated }: ActionCardPanelPro
                     <p className="text-xs text-muted-foreground">
                       +{route.eta_delta_min.toFixed(1)} min ETA delta
                     </p>
+                    {route.waypoints.length < 2 && (
+                      <p className="text-[11px] text-muted-foreground italic">
+                        Map geometry unavailable for this route.
+                      </p>
+                    )}
                   </div>
                 ))
               )}

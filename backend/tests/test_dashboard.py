@@ -5,6 +5,7 @@ import time
 from starlette.testclient import TestClient
 
 from grid_unlocked.config import settings
+from grid_unlocked.dashboard.incident_subscriber import register_incident_subscribers
 from grid_unlocked.features.subscriber import register_feature_subscribers
 from grid_unlocked.governance.service import reset_cache_for_tests
 from grid_unlocked.hotspots.subscriber import register_hotspot_subscribers
@@ -33,8 +34,20 @@ def _setup_client() -> TestClient:
     register_feature_subscribers()
     register_propagation_subscribers()
     register_hotspot_subscribers()
+    register_incident_subscribers()
     registry.load()
     return TestClient(app)
+
+
+def _receive_until_scope(ws, scope: str, *, max_messages: int = 5) -> dict:
+    """Ingest now fans out more than one dashboard delta (e.g. both `hotspot`
+    and `incident` fire on the same event) — drain messages until the scope
+    under test arrives instead of assuming it's the very next message."""
+    for _ in range(max_messages):
+        message = ws.receive_json()
+        if message["scope"] == scope:
+            return message
+    raise AssertionError(f"no {scope!r}-scoped delta received within {max_messages} messages")
 
 
 def test_websocket_receives_card_delta_after_approve():
@@ -62,10 +75,26 @@ def test_websocket_receives_hotspot_delta_on_ingest():
     with client:
         with client.websocket_connect("/ws/dashboard") as ws:
             client.post("/ingest/astram", json={**E2E_EVENT, "id": "FKIDDASH002"})
-            message = ws.receive_json()
-            assert message["scope"] == "hotspot"
+            message = _receive_until_scope(ws, "hotspot")
             assert message["event_id"] == "FKIDDASH002"
             assert message["payload"]["h3_res7"]
+
+
+def test_websocket_receives_incident_delta_on_ingest():
+    """M15 — incident-scoped delta (Stream A) fans out alongside hotspot on
+    every ingest, carrying the lightweight fields a map pin needs."""
+    client = _setup_client()
+    with client:
+        with client.websocket_connect("/ws/dashboard") as ws:
+            client.post(
+                "/ingest/astram",
+                json={**E2E_EVENT, "id": "FKIDDASH006", "corridor": "ORR East 1"},
+            )
+            message = _receive_until_scope(ws, "incident")
+            assert message["event_id"] == "FKIDDASH006"
+            assert message["payload"]["corridor"] == "ORR East 1"
+            assert message["payload"]["lat"] == E2E_EVENT["latitude"]
+            assert message["payload"]["lng"] == E2E_EVENT["longitude"]
 
 
 def test_multiple_connections_all_receive_same_delta():
@@ -100,15 +129,14 @@ def test_card_delta_arrives_within_5s_of_ingest():
         with client.websocket_connect("/ws/dashboard") as ws:
             t0 = time.perf_counter()
             client.post("/ingest/astram", json={**E2E_EVENT, "id": "FKIDDASH005"})
-            ws.receive_json()  # hotspot delta, fired on ingest
+            _receive_until_scope(ws, "hotspot")  # ingest-time deltas (hotspot + incident)
             card = client.get("/recommendations/FKIDDASH005?refresh=true").json()
             client.post(
                 f"/recommendations/{card['card_id']}/approve",
                 json={"commander_id": "CMD-001", "override_codes": []},
             )
-            message = ws.receive_json()  # card delta, fired on approve
+            message = _receive_until_scope(ws, "card")  # card delta, fired on approve
             elapsed = time.perf_counter() - t0
-            assert message["scope"] == "card"
             assert elapsed < 5.0
 
 
