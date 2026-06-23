@@ -297,7 +297,7 @@ export function ActionCardPanel({ card, loading, onMutated, onHoverRoute }: Acti
                 <div className="flex justify-between text-xs">
                   <span className="text-muted-foreground">Road Criticality Index</span>
                   <span className="font-mono font-medium">
-                    {card.impact.rci.toFixed(2)}
+                    {(card.impact.rci * 100).toFixed(0)}%
                   </span>
                 </div>
                 <Progress
@@ -311,7 +311,7 @@ export function ActionCardPanel({ card, loading, onMutated, onHoverRoute }: Acti
                 <div className="flex justify-between text-xs">
                   <span className="text-muted-foreground">P(closure)</span>
                   <span className="font-mono font-medium">
-                    {card.impact.p_closure.toFixed(2)}
+                    {(card.impact.p_closure * 100).toFixed(0)}%
                   </span>
                 </div>
                 <Progress

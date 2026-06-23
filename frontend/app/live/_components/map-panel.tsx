@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Script from "next/script";
 import * as h3 from "h3-js";
 import { Button } from "@/components/ui/button";
+import { Info, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useDashboardSocket } from "@/lib/ws";
 import type {
@@ -156,9 +157,11 @@ interface MapPanelProps {
   // Rank of the diversion route currently hovered in the action card's
   // Routes tab — cross-highlights the matching line on the map.
   highlightedRouteRank?: number | null;
+  activeDashboardTab?: string;
+  selectedPredictedCorridor?: { lat: number; lng: number } | null;
 }
 
-export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank }: MapPanelProps) {
+export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank, activeDashboardTab, selectedPredictedCorridor }: MapPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapplsMap | null>(null);
   const containerIdRef = useRef(`mappls-live-map-${++mapContainerSeq}`);
@@ -196,6 +199,26 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank }: 
   const [showCascade, setShowCascade] = useState(false);
   const [sdkLoadFailed, setSdkLoadFailed] = useState(false);
   const { lastDelta } = useDashboardSocket();
+
+  useEffect(() => {
+    if (activeDashboardTab === "outline") {
+      setShowObserved(true);
+      setShowPredicted(false);
+      setShowCascade(false);
+    } else if (activeDashboardTab === "past") {
+      setShowObserved(false);
+      setShowPredicted(true);
+      setShowCascade(false);
+    } else if (activeDashboardTab === "personnel") {
+      setShowObserved(false);
+      setShowPredicted(false);
+      setShowCascade(true);
+    } else if (activeDashboardTab === "gutter") {
+      setShowObserved(false);
+      setShowPredicted(false);
+      setShowCascade(false);
+    }
+  }, [activeDashboardTab]);
 
   useEffect(() => {
     if (!sdkReady || !containerRef.current || mapRef.current || !window.mappls) return;
@@ -322,8 +345,15 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank }: 
         if (generation !== incidentGenerationRef.current) return;
         if (!window.mappls) return;
 
+        let visibleIncidents = incidents as ActiveIncident[];
+        if (activeDashboardTab === "gutter") {
+          visibleIncidents = visibleIncidents.filter(i => !i.corridor || i.corridor === "Non-corridor");
+        } else if (activeDashboardTab === "past" || activeDashboardTab === "personnel") {
+          visibleIncidents = [];
+        }
+
         const seen = new Set<string>();
-        for (const incident of incidents as ActiveIncident[]) {
+        for (const incident of visibleIncidents) {
           seen.add(incident.event_id);
           const existing = incidentMarkersRef.current.get(incident.event_id);
           if (existing) {
@@ -344,7 +374,7 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank }: 
         }
 
         // Remove markers for incidents that are no longer active (closed,
-        // resolved, or fell out of the `limit` window).
+        // resolved, or fell out of the `limit` window) or hidden by tab state.
         for (const [eventId, marker] of incidentMarkersRef.current) {
           if (!seen.has(eventId)) {
             marker.remove();
@@ -423,7 +453,7 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank }: 
   useEffect(() => {
     if (!mapLoaded || !mapRef.current) return;
     refreshIncidents(mapRef.current);
-  }, [mapLoaded]);
+  }, [mapLoaded, activeDashboardTab]);
 
   // Refresh pins on a real-time incident delta (new event ingested) or a
   // card delta (approve/reject/close can change an event's active status) —
@@ -666,6 +696,12 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank }: 
     flyToWithZoomAnimation(map, { lat, lng }, 13);
   }
 
+  useEffect(() => {
+    if (selectedPredictedCorridor) {
+      flyToPredictedCorridor(selectedPredictedCorridor.lat, selectedPredictedCorridor.lng);
+    }
+  }, [selectedPredictedCorridor]);
+
   if (!MAPPLS_KEY) {
     return (
       <div className="h-full w-full flex items-center justify-center text-sm text-muted-foreground bg-muted/30 p-4 text-center">
@@ -715,53 +751,88 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank }: 
         <Button
           size="sm"
           variant={showCascade ? "default" : "outline"}
-          disabled={!selectedCard}
+          disabled={!selectedCard && !showCascade}
           onClick={() => setShowCascade((v) => !v)}
         >
           Cascade
         </Button>
       </div>
-      {showPredicted && <PredictedForecastList onSelect={flyToPredictedCorridor} />}
+      <MapLegend />
     </div>
   );
 }
 
-function PredictedForecastList({
-  onSelect,
-}: {
-  onSelect: (lat: number, lng: number) => void;
-}) {
-  const [forecasts, setForecasts] = useState<
-    { corridor: string; lift_pct: number; expected_count: number; centroid_lat: number | null; centroid_lon: number | null }[]
-  >([]);
+function MapLegend() {
+  const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    api
-      .hotspotsPredicted()
-      .then((res) => setForecasts(res.forecasts))
-      .catch(() => {});
-  }, []);
+  if (!open) {
+    return (
+      <div className="absolute top-2 right-2 z-10">
+        <Button variant="secondary" size="sm" className="shadow-md gap-1.5 text-xs h-8 bg-background/90 backdrop-blur-sm hover:bg-background" onClick={() => setOpen(true)}>
+          <Info className="size-3.5" />
+          Legend & Jargon
+        </Button>
+      </div>
+    );
+  }
 
   return (
-    <div className="absolute bottom-2 left-2 right-2 bg-background/95 border rounded-md p-2 max-h-32 overflow-y-auto text-xs">
-      <p className="font-medium mb-1">Predicted corridor lift (next horizon)</p>
-      {forecasts.length === 0 && <p className="text-muted-foreground">No forecast data</p>}
-      {forecasts.map((f) => {
-        const hasLocation = f.centroid_lat !== null && f.centroid_lon !== null;
-        return (
-          <div
-            key={f.corridor}
-            className={`flex justify-between ${hasLocation ? "cursor-pointer hover:bg-muted rounded-sm" : ""}`}
-            onClick={() => hasLocation && onSelect(f.centroid_lat!, f.centroid_lon!)}
-          >
-            <span>{f.corridor}</span>
-            <span className={f.lift_pct > 0 ? "text-destructive" : "text-muted-foreground"}>
-              {f.lift_pct > 0 ? "+" : ""}
-              {f.lift_pct.toFixed(0)}%
-            </span>
+    <div className="absolute top-2 right-2 bottom-2 z-10 pointer-events-none flex flex-col items-end">
+      <div className="pointer-events-auto bg-background/95 backdrop-blur-sm border rounded-md p-4 w-72 sm:w-80 shadow-xl text-xs flex flex-col max-h-full animate-in fade-in zoom-in-95 duration-200">
+        <div className="flex items-center justify-between pb-2 border-b shrink-0 mb-4">
+          <h4 className="font-semibold text-sm flex items-center gap-1.5">
+            <Info className="size-4" />
+            Terminology
+          </h4>
+          <Button variant="outline" size="sm" className="h-6 px-2 text-[10px] font-medium rounded-full bg-muted/50 hover:bg-muted" onClick={() => setOpen(false)}>
+            Close
+          </Button>
+        </div>
+        
+        <div className="overflow-y-auto space-y-4 pr-1 pb-1">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 font-medium">
+              <div className="size-2.5 rounded-full bg-green-500 shadow-sm shrink-0" />
+              Observed
+            </div>
+            <p className="text-muted-foreground ml-4.5 leading-relaxed">
+              Current real-time traffic incidents and density hotspots based on active data feeds. Shows actual ground-truth conditions.
+            </p>
           </div>
-        );
-      })}
+          
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 font-medium">
+              <div className="size-2.5 rounded-full bg-blue-500 shadow-sm shrink-0" />
+              Predicted
+            </div>
+            <p className="text-muted-foreground ml-4.5 leading-relaxed">
+              AI-generated forecasts showing expected corridor congestion and lift percentage before they happen, allowing preemptive action.
+            </p>
+          </div>
+          
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 font-medium">
+              <div className="size-2.5 rounded-full bg-purple-500 shadow-sm shrink-0" />
+              Cascade
+            </div>
+            <p className="text-muted-foreground ml-4.5 leading-relaxed">
+              Network propagation graphs illustrating how gridlock from a single seed incident mathematically spreads to connected junctions over time.
+            </p>
+          </div>
+          
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 font-medium">
+              <div className="size-2.5 rounded-full bg-muted-foreground shadow-sm shrink-0" />
+              Gutter Points
+            </div>
+            <p className="text-muted-foreground ml-4.5 leading-relaxed">
+              Incidents or density clusters occurring in unmapped zones or non-corridor areas that fall completely outside the primary spatial indexing bounds.
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
+
+

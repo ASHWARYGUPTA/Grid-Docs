@@ -529,9 +529,42 @@ function AddEditDialog({
   const set = (field: keyof EventFormState, value: string | boolean) =>
     setForm((f) => ({ ...f, [field]: value }));
 
-  const runPrediction = async () => {
+  const validateForm = (): string | null => {
     if (!form.cause || !form.startDate) {
-      setError("Cause and start date are required.");
+      return "Cause and start date are required.";
+    }
+
+    const now = new Date();
+    const startStr = `${form.startDate}T${form.startTime || "00:00"}`;
+    const startObj = new Date(startStr);
+
+    if (startObj < now) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const startDay = new Date(startObj);
+      startDay.setHours(0, 0, 0, 0);
+
+      if (startDay < today) {
+        return "Start date cannot be before the current date.";
+      }
+      return "Start time cannot be in the past.";
+    }
+
+    if (form.endDate) {
+      const endStr = `${form.endDate}T${form.endTime || "00:00"}`;
+      const endObj = new Date(endStr);
+      if (endObj <= startObj) {
+        return "End date and time must be after the start date and time.";
+      }
+    }
+
+    return null;
+  };
+
+  const runPrediction = async () => {
+    const err = validateForm();
+    if (err) {
+      setError(err);
       return;
     }
     setError(null);
@@ -585,8 +618,9 @@ function AddEditDialog({
       return;
     }
     // No prediction yet — ingest directly
-    if (!form.cause || !form.startDate) {
-      setError("Cause and start date are required.");
+    const err = validateForm();
+    if (err) {
+      setError(err);
       return;
     }
     setError(null);
@@ -792,7 +826,7 @@ function AddEditDialog({
 // Page
 // ---------------------------------------------------------------------------
 
-const HOUR_WINDOWS = [24, 48, 72] as const;
+const HOUR_WINDOWS = [24, 48, 72, 168] as const;
 type HourWindow = (typeof HOUR_WINDOWS)[number];
 
 export default function PlannedPage() {
@@ -870,7 +904,7 @@ export default function PlannedPage() {
                 )}
                 onClick={() => setHourWindow(w)}
               >
-                {w}h
+                {w === 168 ? "7d" : `${w}h`}
               </button>
             ))}
           </div>

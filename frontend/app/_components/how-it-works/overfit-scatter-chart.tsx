@@ -74,7 +74,16 @@ export function OverfitScatterChart() {
           cursor={false}
           content={
             <ChartTooltipContent
-              labelKey="model"
+              labelFormatter={(_, payload) => {
+                const item = payload?.[0]?.payload;
+                if (!item) return null;
+                return (
+                  <div className="flex flex-col gap-0.5 mb-1.5">
+                    <span className="font-semibold text-foreground">{item.model}</span>
+                    <span className="text-[10px] text-muted-foreground font-normal">{item.method}</span>
+                  </div>
+                );
+              }}
               formatter={(value, name) => [
                 typeof value === "number" ? value.toFixed(3) : value,
                 name,

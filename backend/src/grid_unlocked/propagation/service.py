@@ -82,6 +82,27 @@ class PropagationService:
     async def get_active(self) -> list[PropagationMap]:
         active = await propagation_cache.list_active()
         if not active:
+            from grid_unlocked.recommendations.repository import RecommendationRepository
+            from grid_unlocked.db.models import NormalizedEventRow
+            from sqlalchemy import select
+            
+            rows = (
+                await self.session.scalars(
+                    select(NormalizedEventRow)
+                    .where(NormalizedEventRow.status == "active")
+                    .order_by(NormalizedEventRow.start_datetime.desc())
+                    .limit(50)
+                )
+            ).all()
+            
+            for row in rows:
+                try:
+                    await self.ripple(RippleRequest(event_id=row.event_id))
+                except Exception:
+                    pass
+            active = await propagation_cache.list_active()
+            
+        if not active:
             return active
         centroid_map = await self._centroid_map()
         return [self._enrich_map(p, centroid_map) for p in active]

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertQueue } from "./_components/alert-queue";
+import { DashboardTable } from "./_components/dashboard-table";
 import { MapPanel } from "./_components/map-panel";
 import { ActionCardPanel } from "./_components/action-card-panel";
 import { AppHeader } from "@/components/app-header";
@@ -16,6 +16,8 @@ const QUEUE_POLL_MS = 15_000;
 export default function LivePage() {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [selectedPredictedCorridor, setSelectedPredictedCorridor] = useState<{lat: number, lng: number} | null>(null);
+  const [activeTab, setActiveTab] = useState("outline");
   const [card, setCard] = useState<ActionCard | null>(null);
   const [cardLoading, setCardLoading] = useState(false);
   const [highlightedRouteRank, setHighlightedRouteRank] = useState<number | null>(null);
@@ -86,54 +88,36 @@ export default function LivePage() {
         </div>
       </AppHeader>
 
-      {/* Three-column layout */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Column 1 — Alert queue */}
-        <div id="tour-alert-queue" className="w-[300px] shrink-0 border-r flex flex-col overflow-hidden">
-          <AlertQueue
-            items={items}
-            selectedEventId={selectedEventId}
-            onSelect={setSelectedEventId}
-          />
-        </div>
-
-        {/* Column 2 — Map */}
-        <div id="tour-live-map" className="flex-1 relative overflow-hidden">
+      {/* Dashboard Layout */}
+      <div className="flex-1 min-h-0 overflow-auto bg-muted/20 p-4 sm:p-6 space-y-6">
+        {/* Map Section */}
+        <div id="tour-live-map" className="h-[45vh] min-h-[350px] w-full border rounded-xl overflow-hidden shadow-sm bg-card relative">
           <MapPanel
             selectedCard={card}
             onSelectEvent={setSelectedEventId}
             highlightedRouteRank={highlightedRouteRank}
+            activeDashboardTab={activeTab}
+            selectedPredictedCorridor={selectedPredictedCorridor}
           />
         </div>
 
-        {/* Column 3 — Action card */}
-        <div id="tour-action-card" className="w-[340px] shrink-0 border-l flex flex-col overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm font-semibold">Action Card</span>
-              <InfoPopover
-                title="Action Card"
-                description="Shows the AI-generated dispatch recommendation for the selected alert. Review the suggested routes, resource allocation, and confidence score before approving or rejecting."
-                side="left"
-              />
-            </div>
-            {card && (
-              <span className="text-xs text-muted-foreground font-mono">
-                {card.card_id}
-              </span>
-            )}
-          </div>
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <ActionCardPanel
-              card={card}
-              loading={cardLoading}
-              onMutated={() => {
-                loadQueue();
-                if (selectedEventId) loadCard(selectedEventId);
-              }}
-              onHoverRoute={setHighlightedRouteRank}
-            />
-          </div>
+        {/* Table Section */}
+        <div id="tour-alert-queue" className="flex-1">
+          <DashboardTable
+            items={items}
+            selectedEventId={selectedEventId}
+            onSelect={setSelectedEventId}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            onSelectPredicted={setSelectedPredictedCorridor}
+            card={card}
+            cardLoading={cardLoading}
+            onMutated={() => {
+              loadQueue();
+              if (selectedEventId) loadCard(selectedEventId);
+            }}
+            onHoverRoute={setHighlightedRouteRank}
+          />
         </div>
       </div>
     </div>
