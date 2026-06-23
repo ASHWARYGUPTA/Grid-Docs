@@ -62,6 +62,7 @@ async def _deliver_to_board(
     event_id: str,
 ) -> None:
     """Background task: attempt delivery with retry until ACK or DLQ."""
+    await asyncio.sleep(0.05)
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         async with _session_module.SessionLocal() as session:
             repo = VmsRepository(session)

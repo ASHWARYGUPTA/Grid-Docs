@@ -69,7 +69,7 @@ class PlannedService:
         )
         template = seed_to_definition(seed)
 
-        overlay = await self._impact_overlay(event, request.force_refresh)
+        overlay = await self._impact_overlay(event, request.force_refresh, est_duration_h)
 
         barricades = apply_vip_barricade_floor(event.event_cause, template.barricade_count)
         staging = barricade_staging_required(event.event_cause, overlay.p_closure)
@@ -107,7 +107,7 @@ class PlannedService:
         await self.repo.save_package(package, attr_hash)
         return package
 
-    async def _impact_overlay(self, event, force_refresh: bool) -> ImpactOverlay:
+    async def _impact_overlay(self, event, force_refresh: bool, est_duration_h: float | None = None) -> ImpactOverlay:
         if not force_refresh:
             stored = await self.repo.get_stored_package(event.event_id)
             if stored and stored.impact_overlay:
@@ -118,7 +118,7 @@ class PlannedService:
             await asyncio.sleep(0.25)
             features = await self.features.get_features(event.event_id)
         if not features:
-            return self._prior_overlay(event)
+            return self._prior_overlay(event, est_duration_h)
 
         result = registry.score(
             features,
@@ -126,24 +126,48 @@ class PlannedService:
             event_cause=event.event_cause,
             corridor=event.corridor,
         )
+        
+        ict_p20 = result.ict_p20_h
+        ict_p50 = result.ict_p50_h
+        ict_p80 = result.ict_p80_h
+        
+        if est_duration_h is not None:
+            # Add an ML-driven "clearance tail" based on the Road Closure Index (RCI)
+            # Traffic impact lasts longer than the event itself depending on severity
+            tail_h = 0.5 + (result.rci * 3.0)
+            base_impact = est_duration_h + tail_h
+            
+            ict_p20 = round(max(0.1, base_impact * 0.8), 1)
+            ict_p50 = round(max(0.1, base_impact), 1)
+            ict_p80 = round(max(0.1, base_impact * 1.5), 1)
+
         return ImpactOverlay(
             p_closure=result.p_closure,
-            ict_p20_h=result.ict_p20_h,
-            ict_p50_h=result.ict_p50_h,
-            ict_p80_h=result.ict_p80_h,
+            ict_p20_h=ict_p20,
+            ict_p50_h=ict_p50,
+            ict_p80_h=ict_p80,
             rci=result.rci,
             severity_band=result.severity_band,
             severity_ordinal=severity_ordinal(result.severity_band),
             source=result.source,
         )
 
-    def _prior_overlay(self, event) -> ImpactOverlay:
+    def _prior_overlay(self, event, est_duration_h: float | None = None) -> ImpactOverlay:
         """Tier 2 fallback — planned prior p_closure=0.36."""
+        if est_duration_h:
+            # Fallback tail is just a flat 1 hour since we don't have full ML features yet
+            base_impact = est_duration_h + 1.0
+            p50 = round(base_impact, 1)
+            p20 = round(base_impact * 0.8, 1)
+            p80 = round(base_impact * 1.5, 1)
+        else:
+            p50, p20, p80 = 4.0, 2.0, 8.0
+            
         return ImpactOverlay(
             p_closure=0.36,
-            ict_p20_h=12.0,
-            ict_p50_h=18.0,
-            ict_p80_h=24.0,
+            ict_p20_h=p20,
+            ict_p50_h=p50,
+            ict_p80_h=p80,
             rci=0.45,
             severity_band="Yellow",
             severity_ordinal=2,

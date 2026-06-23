@@ -2,7 +2,7 @@ import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from grid_unlocked.db.models import NormalizedEventRow, PlannedPackageRow
@@ -70,8 +70,14 @@ class PlannedRepository:
                 select(NormalizedEventRow).where(
                     NormalizedEventRow.is_planned.is_(True),
                     NormalizedEventRow.status == "active",
-                    NormalizedEventRow.start_datetime >= now,
-                    NormalizedEventRow.start_datetime <= horizon,
+                    or_(
+                        # Case 1: Starts in the future, within the horizon
+                        (NormalizedEventRow.start_datetime >= now) &
+                        (NormalizedEventRow.start_datetime <= horizon),
+                        # Case 2: Currently in progress (started in past, not yet ended)
+                        (NormalizedEventRow.start_datetime < now) &
+                        ((NormalizedEventRow.end_datetime.is_(None)) | (NormalizedEventRow.end_datetime >= now))
+                    ),
                 )
             )
         ).all()
