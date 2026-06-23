@@ -66,6 +66,9 @@ async def lifespan(_: FastAPI):
     from grid_unlocked.hotspots.subscriber import register_hotspot_subscribers
 
     register_hotspot_subscribers()
+    from grid_unlocked.dashboard.incident_subscriber import register_incident_subscribers
+
+    register_incident_subscribers()
     registry.load()
     from grid_unlocked.hotspots.service import HotspotService
 
@@ -182,6 +185,9 @@ def create_app() -> FastAPI:
     from grid_unlocked.field.router import router as field_router
 
     app.include_router(field_router)
+    from grid_unlocked.maps.router import router as maps_router
+
+    app.include_router(maps_router)
 
     @app.get("/health", tags=["health"])
     async def system_health() -> dict:

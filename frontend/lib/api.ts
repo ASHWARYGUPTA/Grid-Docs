@@ -1,6 +1,7 @@
 import type {
   AckResponse,
   ActionCard,
+  ActiveIncidentsResponse,
   AnomaliesResponse,
   IngestAck,
   PlannedIngestPayload,
@@ -10,6 +11,7 @@ import type {
   CitizenReportStatusResponse,
   ClosureRequest,
   ClosureResponse,
+  CorridorsResponse,
   DensityHotspotsResponse,
   DrillResult,
   EvalResponse,
@@ -26,6 +28,7 @@ import type {
   SubscriptionRequest,
   SubscriptionResponse,
   TierTransitionsResponse,
+  TransitImpactIndex,
   PromotionChecklistResponse,
   PromotionApproveResponse,
 } from "./types";
@@ -84,6 +87,14 @@ export const api = {
 
   diversionScenarios: (eventId: string) =>
     request<ScenarioResponse>(`/diversions/scenarios/${eventId}`),
+
+  incidentsActive: (limit = 100) =>
+    request<ActiveIncidentsResponse>(`/api/v1/incidents/active?limit=${limit}`),
+
+  corridors: () => request<CorridorsResponse>(`/api/v1/corridors`),
+
+  transitImpact: (eventId: string) =>
+    request<TransitImpactIndex>(`/transit/impact/${eventId}`),
 
   governanceTier: () => request<GovernanceTierResponse>("/governance/tier"),
 

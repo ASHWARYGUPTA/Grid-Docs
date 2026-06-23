@@ -27,6 +27,8 @@ export interface TourStep {
   description: string;
   /** Tooltip placement relative to the target element. */
   placement?: "top" | "bottom" | "left" | "right";
+  /** Optional callback to fire before spotlighting this step. */
+  onEnter?: () => void;
 }
 
 const TOUR_STEPS: TourStep[] = [
@@ -67,6 +69,11 @@ const TOUR_STEPS: TourStep[] = [
     description:
       "When you select an incident the AI produces a recommendation: which unit to dispatch, predicted clearance time (ICT), P(closure), and a cascade risk score. Source is labelled MILP (optimal) or GREEDY_FALLBACK (used when the solver exceeded its 1.5s budget). Commanders approve or reject here.",
     placement: "left",
+    onEnter: () => {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tour-open-action-card"));
+      }
+    },
   },
   {
     targetId: "tour-planned-header",
@@ -178,6 +185,12 @@ export function TourProvider({
         await new Promise((r) => setTimeout(r, 600));
       }
       navigatedRef.current = false;
+
+      if (step.onEnter) {
+        step.onEnter();
+        // Give time for UI reactions like expanding a row
+        await new Promise((r) => setTimeout(r, 300));
+      }
 
       if (!step.targetId) {
         setSpotlightRect(null);
@@ -398,7 +411,7 @@ function useTooltipPosition(
   }
 
   const CARD_W = 320;
-  const CARD_H = 180; // approximate
+  const CARD_H = 300; // approximate, increased to prevent clipping for long texts
   const GAP = 16;
   const vw = typeof window !== "undefined" ? window.innerWidth : 1280;
   const vh = typeof window !== "undefined" ? window.innerHeight : 800;

@@ -31,6 +31,15 @@ class CusumTracker:
 
     def record(self, corridor: str, timestamp: datetime | None = None) -> None:
         ts = timestamp or datetime.now(UTC)
+        # Normalize to UTC-aware on input — this tracker is a long-lived
+        # process-global singleton, so naive datetimes from one caller
+        # (e.g. SQLite-backed event rows, which round-trip naive) and aware
+        # ones from another would otherwise coexist in `_samples` and crash
+        # the `>=` comparison in `_evaluate` the next time a mixed batch is
+        # scanned. Same caveat already documented in learning/buffer.py and
+        # field/service.py for the same naive/aware split.
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
         self._samples.append(RateSample(corridor=corridor, timestamp=ts))
         self._evaluate(corridor, ts)
 

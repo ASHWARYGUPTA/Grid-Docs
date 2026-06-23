@@ -114,6 +114,38 @@ async def test_scenarios_for_event(client):
     assert body["corridor"] == "ORR East 1"
     assert body["p_closure"] > 0
     assert len(body["routes"]) >= 1
+    for route in body["routes"]:
+        assert "waypoints" in route
+        for wp in route["waypoints"]:
+            assert "lat" in wp and "lng" in wp
+
+
+@pytest.mark.asyncio
+async def test_waypoints_resolve_from_corridor_centroids(client):
+    """Seed two centroids and confirm the route waypoints reflect them."""
+    import grid_unlocked.db.session as _session_module
+    from grid_unlocked.db.models import CorridorCentroidRow
+
+    async with _session_module.SessionLocal() as session:
+        session.add(
+            CorridorCentroidRow(corridor="Old Airport Road", lat=12.95, lon=77.65, sample_count=10)
+        )
+        session.add(
+            CorridorCentroidRow(corridor="Hosur Road", lat=12.91, lon=77.62, sample_count=10)
+        )
+        await session.commit()
+
+    resp = await client.post("/diversions/compute", json={"corridor": "ORR East 1", "k": 3})
+    assert resp.status_code == 200
+    routes = resp.json()["routes"]
+    resolved = [wp for r in routes for wp in r["waypoints"]]
+    assert resolved, "expected at least one resolved waypoint"
+    corridors = {wp["corridor"] for wp in resolved}
+    assert corridors & {"Old Airport Road", "Hosur Road"}
+    for wp in resolved:
+        if wp["corridor"] == "Old Airport Road":
+            assert wp["lat"] == pytest.approx(12.95)
+            assert wp["lng"] == pytest.approx(77.65)
 
 
 @pytest.mark.asyncio

@@ -73,6 +73,7 @@ async def setup_command_queue(station_client: MockStationClient | None = None) -
 
 async def _process_command(cmd: QueuedCommand, client: MockStationClient) -> None:
     """Execute one command with retry logic, writing audit entries throughout."""
+    await asyncio.sleep(0.05)
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         async with _session_module.SessionLocal() as session:
             repo = ExecutionRepository(session)
@@ -245,12 +246,18 @@ class ExecutionService:
                 detail="M10 execution disabled in Tier 3 continuity mode. Manual dispatch SOP applies.",
             )
 
-        dispatch_result = await self._enqueue_command(req, CommandType.DISPATCH)
+        cmds_to_enqueue: list[QueuedCommand] = []
+
+        dispatch_result = await self._enqueue_command(req, CommandType.DISPATCH, cmds_to_enqueue)
 
         barricade_execution_id: str | None = None
         if req.barricade_count > 0:
-            barricade_result = await self._enqueue_command(req, CommandType.BARRICADE)
+            barricade_result = await self._enqueue_command(req, CommandType.BARRICADE, cmds_to_enqueue)
             barricade_execution_id = barricade_result.execution_id
+
+        queue = get_command_queue()
+        for cmd in cmds_to_enqueue:
+            await queue.enqueue(cmd)
 
         elapsed = round((time.perf_counter() - t0) * 1000, 2)
         return ExecutionEnqueueResponse(
@@ -263,7 +270,7 @@ class ExecutionService:
         )
 
     async def _enqueue_command(
-        self, req: ExecuteDispatchRequest, command_type: CommandType
+        self, req: ExecuteDispatchRequest, command_type: CommandType, cmds_to_enqueue: list[QueuedCommand] | None = None
     ) -> ExecutionEnqueueResponse:
         """Enqueue a single command (dispatch or barricade), idempotent on
         (approval_token, command_type)."""
@@ -303,9 +310,12 @@ class ExecutionService:
             recommendation_id=req.recommendation_id,
         )
 
-        # Fire-and-forget — caller returns immediately
-        queue = get_command_queue()
-        await queue.enqueue(cmd)
+        # Fire-and-forget — caller or background worker will enqueue
+        if cmds_to_enqueue is not None:
+            cmds_to_enqueue.append(cmd)
+        else:
+            queue = get_command_queue()
+            await queue.enqueue(cmd)
 
         elapsed = round((time.perf_counter() - t0) * 1000, 2)
         logger.info(

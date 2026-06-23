@@ -301,6 +301,10 @@ export interface PropagationNode {
   risk: number;
   hop: number;
   parent_edge: string | null;
+  // Resolved from corridor_centroids server-side (M17) — null when the
+  // node's corridor has no centroid on record. Never fabricated.
+  lat: number | null;
+  lng: number | null;
 }
 
 export interface PropagationMap {
@@ -312,16 +316,77 @@ export interface PropagationMap {
   latency_ms: number;
 }
 
+export interface RouteWaypoint {
+  lat: number;
+  lng: number;
+  corridor: string | null;
+}
+
 export interface DiversionRoute {
   rank: number;
   junction_id: string;
   description: string;
   route_summary: string;
   path: string[];
+  waypoints: RouteWaypoint[];
   eta_delta_min: number;
   capacity_class: string;
   gridlock_cycle_detected: boolean;
   edge_disjoint: boolean;
+}
+
+export interface ActiveIncident {
+  event_id: string;
+  corridor: string | null;
+  junction: string | null;
+  event_type: string;
+  event_cause: string;
+  lat: number;
+  lng: number;
+  rci: number | null;
+  p_closure: number | null;
+  severity_band: SeverityBand | null;
+  status: string;
+  ingested_at: string;
+}
+
+export interface ActiveIncidentsResponse {
+  incidents: ActiveIncident[];
+}
+
+export interface CorridorCentroid {
+  name: string;
+  lat: number;
+  lon: number;
+  sample_count: number;
+}
+
+export interface CorridorsResponse {
+  corridors: CorridorCentroid[];
+}
+
+// M12 TransitImpactService — mirrors backend transit/schemas.py
+export interface TransitAffectedRoute {
+  route_id: string;
+  name: string;
+  occupancy: number;
+  predicted_delay_min: number;
+  overlap_fraction: number;
+}
+
+export interface TransitImpactIndex {
+  event_id: string;
+  corridor: string | null;
+  tier: string;
+  degraded: boolean;
+  advisory_only: boolean;
+  passenger_delay_index: number;
+  transfer_overload_risk: number;
+  affected_routes: TransitAffectedRoute[];
+  advisory_message: string | null;
+  cached: boolean;
+  latency_ms: number;
+  generated_at: string;
 }
 
 export interface ScenarioResponse {
@@ -412,7 +477,7 @@ export interface PlannedEventPackage {
   generated_at: string;
 }
 
-export type DeltaScope = "card" | "tier" | "hotspot" | "citizen" | "field";
+export type DeltaScope = "card" | "tier" | "hotspot" | "citizen" | "field" | "incident";
 
 export interface DashboardDelta {
   type: "dashboard.delta";

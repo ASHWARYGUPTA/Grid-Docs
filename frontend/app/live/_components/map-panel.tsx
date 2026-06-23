@@ -4,17 +4,59 @@ import { useEffect, useRef, useState } from "react";
 import Script from "next/script";
 import * as h3 from "h3-js";
 import { Button } from "@/components/ui/button";
+import { Info, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useDashboardSocket } from "@/lib/ws";
-import type { ActionCard, CellDensityPoint, HotspotCluster } from "@/lib/types";
+import type {
+  ActionCard,
+  ActiveIncident,
+  CellDensityPoint,
+  HotspotCluster,
+  PropagationNode,
+} from "@/lib/types";
+
+// RCI colour bands for live incident pins — mirrors the thresholds already
+// used for the action card's border colour (see action-card-panel.tsx)
+// so a pin's colour always agrees with the card it opens.
+export function rciColor(rci: number | null): string {
+  if (rci === null) return "#9ca3af"; // not yet scored — neutral grey
+  if (rci > 0.7) return "#dc2626";
+  if (rci > 0.4) return "#f97316";
+  if (rci > 0.2) return "#facc15";
+  return "#22c55e";
+}
+
+const INCIDENT_PIN_HTML = (color: string) => `
+  <div style="width:16px;height:16px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,0.25)"></div>`;
 
 const BENGALURU_CENTER: MapplsLngLat = { lat: 12.9716, lng: 77.5946 };
-const MAP_CONTAINER_ID = "mappls-live-map";
+// Every MapPanel mount gets its own container id rather than a fixed one.
+// The previous instance's WebGL context/canvas isn't guaranteed to be fully
+// released by the time a remount's init effect runs (observed in the wild
+// as `eglCreateContext: Requested version is not supported` on the second
+// context request) — a fresh id rules out the SDK ever attaching a second
+// map instance onto a stale canvas it didn't create.
+let mapContainerSeq = 0;
 
 const MAPPLS_KEY = process.env.NEXT_PUBLIC_MAPPLS_KEY;
 const MAPPLS_SDK_URL = `https://sdk.mappls.com/map/sdk/web?v=3.0&access_token=${MAPPLS_KEY}`;
 
 const HEATMAP_GRADIENT = ["#22c55e", "#facc15", "#f97316", "#dc2626"];
+
+// Rank-ordered colours for diversion route polylines — rank 1 (the top
+// recommendation) gets the most saturated colour, later ranks fade out so
+// the primary route reads clearly even with 3 routes overlapping.
+const DIVERSION_ROUTE_COLORS = ["#2563eb", "#7c3aed", "#0891b2"];
+const DIVERSION_SOURCE_PREFIX_ID = "diversion-route-src-";
+const DIVERSION_LAYER_PREFIX_ID = "diversion-route-layer-";
+
+// Cascade overlay (B-4, bonus) — graded by node risk, reusing the same RCI
+// colour bands as incident pins so "red" means the same thing everywhere on
+// this map.
+const CASCADE_NODE_SOURCE_ID = "cascade-nodes-src";
+const CASCADE_NODE_LAYER_ID = "cascade-nodes-layer";
+const CASCADE_EDGE_SOURCE_ID = "cascade-edges-src";
+const CASCADE_EDGE_LAYER_ID = "cascade-edges-layer";
 
 // Distinct from the heatmap palette — used only for the marker placed by a
 // click-to-locate action, so it's visually obvious which pin the zoom
@@ -111,17 +153,39 @@ function buildCellPopupHtml(summary: {
 
 interface MapPanelProps {
   selectedCard: ActionCard | null;
+  onSelectEvent?: (eventId: string) => void;
+  // Rank of the diversion route currently hovered in the action card's
+  // Routes tab — cross-highlights the matching line on the map.
+  highlightedRouteRank?: number | null;
+  activeDashboardTab?: string;
+  selectedPredictedCorridor?: { lat: number; lng: number } | null;
 }
 
-export function MapPanel({ selectedCard }: MapPanelProps) {
+export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank, activeDashboardTab, selectedPredictedCorridor }: MapPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapplsMap | null>(null);
-  const [sdkReady, setSdkReady] = useState(false);
+  const containerIdRef = useRef(`mappls-live-map-${++mapContainerSeq}`);
+  // next/script dedupes by `src` and only fires `onReady` once globally, so
+  // navigating away from /live and back mounts a fresh MapPanel against an
+  // already-loaded script — the onReady callback below never fires again,
+  // leaving sdkReady stuck false until a full page reload re-runs
+  // everything. Seeding from window.mappls (already set by the earlier
+  // load) avoids that stuck state.
+  const [sdkReady, setSdkReady] = useState(() => typeof window !== "undefined" && !!window.mappls);
   const [mapLoaded, setMapLoaded] = useState(false);
   const heatmapLayerIdRef = useRef<string | null>(null);
   const clusterMarkersRef = useRef<MapplsMarker[]>([]);
   const selectedMarkerRef = useRef<MapplsMarker | null>(null);
   const predictedMarkerRef = useRef<MapplsMarker | null>(null);
+  // event_id -> marker, so a refresh only adds/removes the incidents that
+  // actually changed instead of tearing down and rebuilding every pin.
+  const incidentMarkersRef = useRef<Map<string, MapplsMarker>>(new Map());
+  const onSelectEventRef = useRef(onSelectEvent);
+  onSelectEventRef.current = onSelectEvent;
+  // Guards overlapping refreshIncidents() calls the same way
+  // refreshGenerationRef guards refreshObserved() below.
+  const incidentGenerationRef = useRef(0);
+  const diversionLayerIdsRef = useRef<string[]>([]);
   // Pending steps of an in-flight zoom-out/zoom-in animation — cleared and
   // replaced whenever a new target is selected before the previous
   // animation finishes, so two quick clicks don't fight over the viewport.
@@ -132,15 +196,36 @@ export function MapPanel({ selectedCard }: MapPanelProps) {
   const refreshGenerationRef = useRef(0);
   const [showObserved, setShowObserved] = useState(true);
   const [showPredicted, setShowPredicted] = useState(false);
+  const [showCascade, setShowCascade] = useState(false);
   const [sdkLoadFailed, setSdkLoadFailed] = useState(false);
   const { lastDelta } = useDashboardSocket();
+
+  useEffect(() => {
+    if (activeDashboardTab === "outline") {
+      setShowObserved(true);
+      setShowPredicted(false);
+      setShowCascade(false);
+    } else if (activeDashboardTab === "past") {
+      setShowObserved(false);
+      setShowPredicted(true);
+      setShowCascade(false);
+    } else if (activeDashboardTab === "personnel") {
+      setShowObserved(false);
+      setShowPredicted(false);
+      setShowCascade(true);
+    } else if (activeDashboardTab === "gutter") {
+      setShowObserved(false);
+      setShowPredicted(false);
+      setShowCascade(false);
+    }
+  }, [activeDashboardTab]);
 
   useEffect(() => {
     if (!sdkReady || !containerRef.current || mapRef.current || !window.mappls) return;
     // Mappls's Map constructor only initializes correctly given a container
     // *id string* — passing the element directly silently returns a
     // near-empty, non-functional instance with no map-specific methods.
-    const map = new window.mappls.Map(MAP_CONTAINER_ID, {
+    const map = new window.mappls.Map(containerIdRef.current, {
       center: BENGALURU_CENTER,
       zoom: 11,
     });
@@ -156,7 +241,21 @@ export function MapPanel({ selectedCard }: MapPanelProps) {
       resizeObserver.disconnect();
       zoomAnimationTimersRef.current.forEach(clearTimeout);
       zoomAnimationTimersRef.current = [];
-      map.remove();
+      incidentMarkersRef.current.forEach((m) => m.remove());
+      incidentMarkersRef.current.clear();
+      diversionLayerIdsRef.current = [];
+      // Deliberately NOT calling map.remove() here. It's the SDK's own
+      // teardown call (loaded from a CDN script, not introspectable), and
+      // it schedules some deferred internal work that throws asynchronously
+      // ("Cannot read properties of undefined (reading 'destroy')",
+      // surfacing from the SDK's own minified source) once the container
+      // DOM node is already gone — a try/catch around the call site can't
+      // catch that, since the throw happens on a later tick, not
+      // synchronously inside this function. Abandoning the instance instead
+      // (disconnect our own listeners/observers, null our ref, let GC
+      // reclaim it) avoids the crash. Each mount uses a unique container id
+      // (see containerIdRef above), so an abandoned instance can never
+      // collide with the next mount's map.
       mapRef.current = null;
     };
   }, [sdkReady]);
@@ -234,6 +333,60 @@ export function MapPanel({ selectedCard }: MapPanelProps) {
       });
   }
 
+  // Diffs the active-incidents response against the markers already on the
+  // map, by event_id, so a refresh only adds/removes/recolours what actually
+  // changed instead of tearing down and recreating every pin (which would
+  // cause visible flicker on every WS-triggered refresh).
+  function refreshIncidents(map: MapplsMap) {
+    const generation = ++incidentGenerationRef.current;
+    api
+      .incidentsActive(100)
+      .then(({ incidents }) => {
+        if (generation !== incidentGenerationRef.current) return;
+        if (!window.mappls) return;
+
+        let visibleIncidents = incidents as ActiveIncident[];
+        if (activeDashboardTab === "gutter") {
+          visibleIncidents = visibleIncidents.filter(i => !i.corridor || i.corridor === "Non-corridor");
+        } else if (activeDashboardTab === "past" || activeDashboardTab === "personnel") {
+          visibleIncidents = [];
+        }
+
+        const seen = new Set<string>();
+        for (const incident of visibleIncidents) {
+          seen.add(incident.event_id);
+          const existing = incidentMarkersRef.current.get(incident.event_id);
+          if (existing) {
+            existing.setLngLat({ lat: incident.lat, lng: incident.lng });
+            // This SDK's marker has no documented way to swap `html` after
+            // construction (same limitation as the highlight/predicted
+            // markers above), so a colour change recreates the marker.
+            existing.remove();
+            incidentMarkersRef.current.delete(incident.event_id);
+          }
+          const marker = new window.mappls!.Marker({
+            map,
+            position: { lat: incident.lat, lng: incident.lng },
+            html: INCIDENT_PIN_HTML(rciColor(incident.rci)),
+          });
+          marker.addListener("click", () => onSelectEventRef.current?.(incident.event_id));
+          incidentMarkersRef.current.set(incident.event_id, marker);
+        }
+
+        // Remove markers for incidents that are no longer active (closed,
+        // resolved, or fell out of the `limit` window) or hidden by tab state.
+        for (const [eventId, marker] of incidentMarkersRef.current) {
+          if (!seen.has(eventId)) {
+            marker.remove();
+            incidentMarkersRef.current.delete(eventId);
+          }
+        }
+      })
+      .catch((err) => {
+        console.error("MapPanel: failed to refresh incident pins", err);
+      });
+  }
+
   // Zooms out from the current viewport, pans to the target while zoomed
   // out, then zooms back in — giving a visible "fly across the map" effect
   // instead of an instant jump cut to the new location.
@@ -295,6 +448,26 @@ export function MapPanel({ selectedCard }: MapPanelProps) {
     }
   }, [lastDelta]);
 
+  // Load incident pins once the map is ready, independent of the
+  // observed/predicted toggle — live incidents are always shown.
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    refreshIncidents(mapRef.current);
+  }, [mapLoaded, activeDashboardTab]);
+
+  // Refresh pins on a real-time incident delta (new event ingested) or a
+  // card delta (approve/reject/close can change an event's active status) —
+  // both can change which incidents should currently be on the map. The
+  // delta payload carries no RCI (scored asynchronously by a separate
+  // subscriber on the backend), so this only refreshes pin presence/position
+  // — colour catches up once /api/v1/incidents/active re-joins the score.
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (lastDelta?.scope === "incident" || lastDelta?.scope === "card") {
+      refreshIncidents(mapRef.current);
+    }
+  }, [lastDelta]);
+
   // Move the single selected-event marker to the card's location, derived
   // from impact context — reuses one marker instance via setPosition rather
   // than removing/recreating, since marker removal isn't documented here.
@@ -327,6 +500,187 @@ export function MapPanel({ selectedCard }: MapPanelProps) {
     flyToWithZoomAnimation(map, { lat, lng }, 13);
   }, [selectedCard]);
 
+  // Draw the selected card's diversion routes as MapLibre line layers (the
+  // SDK has no documented Polyline/Directions helper — only Marker,
+  // InfoWindow, and HeatmapLayer are Mappls-authored APIs verified against
+  // the live SDK — so this draws on the underlying MapLibre map directly,
+  // the same surface getLayer/removeLayer already prove exists). Each route
+  // is corridor-level waypoints resolved server-side from real
+  // corridor_centroids (never fabricated); routes with fewer than 2
+  // resolved waypoints are skipped rather than drawing a 1-point "line".
+  //
+  // Clears the previous selection's layers at the start of every run
+  // (covers both "selection changed" and "selection cleared") rather than
+  // via a returned cleanup, since the map instance itself outlives this
+  // effect and removing layers twice would throw on the second call.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.mappls) return;
+
+    for (const layerId of diversionLayerIdsRef.current) {
+      if (map.getLayer(layerId)) map.removeLayer(layerId);
+      const sourceId = layerId.replace(DIVERSION_LAYER_PREFIX_ID, DIVERSION_SOURCE_PREFIX_ID);
+      map.removeSource(sourceId);
+    }
+    diversionLayerIdsRef.current = [];
+
+    const routes = selectedCard?.diversions ?? [];
+    for (const route of routes) {
+      if (route.waypoints.length < 2) continue;
+      const sourceId = `${DIVERSION_SOURCE_PREFIX_ID}${route.rank}`;
+      const layerId = `${DIVERSION_LAYER_PREFIX_ID}${route.rank}`;
+      const color = DIVERSION_ROUTE_COLORS[(route.rank - 1) % DIVERSION_ROUTE_COLORS.length];
+
+      map.addSource(sourceId, {
+        type: "geojson",
+        data: {
+          type: "Feature",
+          properties: {},
+          geometry: {
+            type: "LineString",
+            coordinates: route.waypoints.map((w) => [w.lng, w.lat]),
+          },
+        },
+      });
+      map.addLayer({
+        id: layerId,
+        type: "line",
+        source: sourceId,
+        paint: {
+          "line-color": color,
+          "line-width": route.rank === 1 ? 4 : 2.5,
+          "line-dasharray": route.rank === 1 ? [1, 0] : [2, 1.5],
+          "line-opacity": 0.85,
+        },
+      });
+      diversionLayerIdsRef.current.push(layerId);
+    }
+  }, [selectedCard]);
+
+  // Cross-highlight: when a route row is hovered in the action card's
+  // Routes tab, emphasize its line and dim the others. Runs after the
+  // draw effect above (separate effect, since it only repaints existing
+  // layers and shouldn't re-run the add/remove logic on every hover).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const routes = selectedCard?.diversions ?? [];
+    for (const route of routes) {
+      const layerId = `${DIVERSION_LAYER_PREFIX_ID}${route.rank}`;
+      if (!map.getLayer(layerId)) continue;
+      const isHighlighted = highlightedRouteRank === route.rank;
+      const isAnyHighlighted = highlightedRouteRank !== null && highlightedRouteRank !== undefined;
+      map.setPaintProperty(layerId, "line-width", isHighlighted ? 6 : route.rank === 1 ? 4 : 2.5);
+      map.setPaintProperty(layerId, "line-opacity", isAnyHighlighted && !isHighlighted ? 0.25 : 0.85);
+    }
+  }, [highlightedRouteRank, selectedCard]);
+
+  // Cascade propagation overlay (B-4, bonus): draws the GCDH propagation
+  // map for the selected event as graded circle nodes (colour/size by
+  // node.risk) connected by edges derived from parent_edge, which the
+  // backend encodes as "{parentNodeId}->{thisNodeId}" (gcdh.py). Nodes
+  // without a resolved lat/lng (corridor has no centroid on record) are
+  // skipped rather than fabricating a position, same rule as diversion
+  // waypoints above.
+  //
+  // Cleared at the top of the effect (covers toggle-off, selection change,
+  // and selection clear) rather than via a returned cleanup, for the same
+  // reason as the diversion overlay: the map outlives this effect, so a
+  // returned cleanup would double-remove on the next run.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.mappls) return;
+
+    if (map.getLayer(CASCADE_EDGE_LAYER_ID)) map.removeLayer(CASCADE_EDGE_LAYER_ID);
+    if (map.getLayer(CASCADE_NODE_LAYER_ID)) map.removeLayer(CASCADE_NODE_LAYER_ID);
+    if (map.getSource(CASCADE_EDGE_SOURCE_ID)) map.removeSource(CASCADE_EDGE_SOURCE_ID);
+    if (map.getSource(CASCADE_NODE_SOURCE_ID)) map.removeSource(CASCADE_NODE_SOURCE_ID);
+
+    if (!showCascade || !selectedCard) return;
+
+    let cancelled = false;
+    api.propagationActive().then((maps) => {
+      if (cancelled) return;
+      const current = mapRef.current;
+      if (!current || !window.mappls) return;
+      const cascade = maps.find((m) => m.event_id === selectedCard.event_id);
+      if (!cascade) return;
+
+      const located = cascade.nodes.filter(
+        (n): n is PropagationNode & { lat: number; lng: number } => n.lat !== null && n.lng !== null,
+      );
+      const byNodeId = new Map(located.map((n) => [n.node_id, n]));
+
+      const nodeFeatures = located.map((n) => ({
+        type: "Feature" as const,
+        properties: { risk: n.risk },
+        geometry: { type: "Point" as const, coordinates: [n.lng, n.lat] },
+      }));
+
+      const edgeFeatures: { type: "Feature"; properties: Record<string, never>; geometry: { type: "LineString"; coordinates: number[][] } }[] = [];
+      for (const node of located) {
+        if (!node.parent_edge) continue;
+        const [parentId] = node.parent_edge.split("->");
+        const parent = byNodeId.get(parentId);
+        if (!parent) continue;
+        edgeFeatures.push({
+          type: "Feature",
+          properties: {},
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [parent.lng, parent.lat],
+              [node.lng, node.lat],
+            ],
+          },
+        });
+      }
+
+      current.addSource(CASCADE_EDGE_SOURCE_ID, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: edgeFeatures },
+      });
+      current.addLayer({
+        id: CASCADE_EDGE_LAYER_ID,
+        type: "line",
+        source: CASCADE_EDGE_SOURCE_ID,
+        paint: { "line-color": "#9333ea", "line-width": 1.5, "line-dasharray": [2, 1.5], "line-opacity": 0.6 },
+      });
+      current.addSource(CASCADE_NODE_SOURCE_ID, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: nodeFeatures },
+      });
+      current.addLayer({
+        id: CASCADE_NODE_LAYER_ID,
+        type: "circle",
+        source: CASCADE_NODE_SOURCE_ID,
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["get", "risk"], 0, 4, 1, 12],
+          "circle-color": [
+            "interpolate",
+            ["linear"],
+            ["get", "risk"],
+            0,
+            "#22c55e",
+            0.2,
+            "#facc15",
+            0.4,
+            "#f97316",
+            0.7,
+            "#dc2626",
+          ],
+          "circle-opacity": 0.75,
+          "circle-stroke-width": 1,
+          "circle-stroke-color": "#fff",
+        },
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showCascade, selectedCard]);
+
   function flyToPredictedCorridor(lat: number, lng: number) {
     const map = mapRef.current;
     if (!map || !window.mappls) return;
@@ -341,6 +695,12 @@ export function MapPanel({ selectedCard }: MapPanelProps) {
     }
     flyToWithZoomAnimation(map, { lat, lng }, 13);
   }
+
+  useEffect(() => {
+    if (selectedPredictedCorridor) {
+      flyToPredictedCorridor(selectedPredictedCorridor.lat, selectedPredictedCorridor.lng);
+    }
+  }, [selectedPredictedCorridor]);
 
   if (!MAPPLS_KEY) {
     return (
@@ -372,7 +732,7 @@ export function MapPanel({ selectedCard }: MapPanelProps) {
         onReady={() => setSdkReady(true)}
         onError={() => setSdkLoadFailed(true)}
       />
-      <div ref={containerRef} id={MAP_CONTAINER_ID} className="h-full w-full" />
+      <div ref={containerRef} id={containerIdRef.current} className="h-full w-full" />
       <div className="absolute top-2 left-2 flex gap-1 bg-background/90 rounded-md p-1 border">
         <Button
           size="sm"
@@ -388,48 +748,91 @@ export function MapPanel({ selectedCard }: MapPanelProps) {
         >
           Predicted
         </Button>
+        <Button
+          size="sm"
+          variant={showCascade ? "default" : "outline"}
+          disabled={!selectedCard && !showCascade}
+          onClick={() => setShowCascade((v) => !v)}
+        >
+          Cascade
+        </Button>
       </div>
-      {showPredicted && <PredictedForecastList onSelect={flyToPredictedCorridor} />}
+      <MapLegend />
     </div>
   );
 }
 
-function PredictedForecastList({
-  onSelect,
-}: {
-  onSelect: (lat: number, lng: number) => void;
-}) {
-  const [forecasts, setForecasts] = useState<
-    { corridor: string; lift_pct: number; expected_count: number; centroid_lat: number | null; centroid_lon: number | null }[]
-  >([]);
+function MapLegend() {
+  const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    api
-      .hotspotsPredicted()
-      .then((res) => setForecasts(res.forecasts))
-      .catch(() => {});
-  }, []);
+  if (!open) {
+    return (
+      <div className="absolute top-2 right-2 z-10">
+        <Button variant="secondary" size="sm" className="shadow-md gap-1.5 text-xs h-8 bg-background/90 backdrop-blur-sm hover:bg-background" onClick={() => setOpen(true)}>
+          <Info className="size-3.5" />
+          Legend & Jargon
+        </Button>
+      </div>
+    );
+  }
 
   return (
-    <div className="absolute bottom-2 left-2 right-2 bg-background/95 border rounded-md p-2 max-h-32 overflow-y-auto text-xs">
-      <p className="font-medium mb-1">Predicted corridor lift (next horizon)</p>
-      {forecasts.length === 0 && <p className="text-muted-foreground">No forecast data</p>}
-      {forecasts.map((f) => {
-        const hasLocation = f.centroid_lat !== null && f.centroid_lon !== null;
-        return (
-          <div
-            key={f.corridor}
-            className={`flex justify-between ${hasLocation ? "cursor-pointer hover:bg-muted rounded-sm" : ""}`}
-            onClick={() => hasLocation && onSelect(f.centroid_lat!, f.centroid_lon!)}
-          >
-            <span>{f.corridor}</span>
-            <span className={f.lift_pct > 0 ? "text-destructive" : "text-muted-foreground"}>
-              {f.lift_pct > 0 ? "+" : ""}
-              {f.lift_pct.toFixed(0)}%
-            </span>
+    <div className="absolute top-2 right-2 bottom-2 z-10 pointer-events-none flex flex-col items-end">
+      <div className="pointer-events-auto bg-background/95 backdrop-blur-sm border rounded-md p-4 w-72 sm:w-80 shadow-xl text-xs flex flex-col max-h-full animate-in fade-in zoom-in-95 duration-200">
+        <div className="flex items-center justify-between pb-2 border-b shrink-0 mb-4">
+          <h4 className="font-semibold text-sm flex items-center gap-1.5">
+            <Info className="size-4" />
+            Terminology
+          </h4>
+          <Button variant="outline" size="sm" className="h-6 px-2 text-[10px] font-medium rounded-full bg-muted/50 hover:bg-muted" onClick={() => setOpen(false)}>
+            Close
+          </Button>
+        </div>
+        
+        <div className="overflow-y-auto space-y-4 pr-1 pb-1">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 font-medium">
+              <div className="size-2.5 rounded-full bg-green-500 shadow-sm shrink-0" />
+              Observed
+            </div>
+            <p className="text-muted-foreground ml-4.5 leading-relaxed">
+              Current real-time traffic incidents and density hotspots based on active data feeds. Shows actual ground-truth conditions.
+            </p>
           </div>
-        );
-      })}
+          
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 font-medium">
+              <div className="size-2.5 rounded-full bg-blue-500 shadow-sm shrink-0" />
+              Predicted
+            </div>
+            <p className="text-muted-foreground ml-4.5 leading-relaxed">
+              AI-generated forecasts showing expected corridor congestion and lift percentage before they happen, allowing preemptive action.
+            </p>
+          </div>
+          
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 font-medium">
+              <div className="size-2.5 rounded-full bg-purple-500 shadow-sm shrink-0" />
+              Cascade
+            </div>
+            <p className="text-muted-foreground ml-4.5 leading-relaxed">
+              Network propagation graphs illustrating how gridlock from a single seed incident mathematically spreads to connected junctions over time.
+            </p>
+          </div>
+          
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 font-medium">
+              <div className="size-2.5 rounded-full bg-muted-foreground shadow-sm shrink-0" />
+              Gutter Points
+            </div>
+            <p className="text-muted-foreground ml-4.5 leading-relaxed">
+              Incidents or density clusters occurring in unmapped zones or non-corridor areas that fall completely outside the primary spatial indexing bounds.
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
+
+

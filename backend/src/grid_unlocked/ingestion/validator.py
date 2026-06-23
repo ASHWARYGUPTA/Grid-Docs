@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from dateutil import parser as date_parser
@@ -23,8 +23,12 @@ def parse_datetime(value: datetime | str | None) -> datetime | None:
     if value is None or value == "" or str(value).upper() == "NULL":
         return None
     if isinstance(value, datetime):
-        return value
-    return date_parser.isoparse(str(value))
+        dt = value
+    else:
+        dt = date_parser.isoparse(str(value))
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def parse_bool(value: bool | str | None, default: bool = False) -> bool:

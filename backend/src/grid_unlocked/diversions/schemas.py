@@ -2,7 +2,16 @@ from pydantic import BaseModel, Field
 
 
 class RouteWaypoint(BaseModel):
-    node_id: str
+    """Corridor-level waypoint resolved from a diversion `path` node id.
+
+    Coordinates are the mean lat/lon of the corridor from `corridor_centroids`
+    (M17). The corridor proxy graph has no per-node GPS — so a node with no
+    centroid is omitted, never fabricated. Clients gate route drawing on
+    `len(waypoints) >= 2`.
+    """
+
+    lat: float
+    lng: float
     corridor: str | None = None
 
 
@@ -12,6 +21,7 @@ class DiversionRoute(BaseModel):
     description: str
     route_summary: str
     path: list[str]
+    waypoints: list[RouteWaypoint] = Field(default_factory=list)
     eta_delta_min: float
     capacity_class: str = Field(description="low | medium | high")
     gridlock_cycle_detected: bool = False

@@ -58,6 +58,7 @@ import { InfoPopover } from "@/components/info-popover";
 import { api } from "@/lib/api";
 import type {
   AnalogEvent,
+  CorridorCentroid,
   HotspotCluster,
   PlannedEventPackage,
   PlannedIngestPayload,
@@ -84,24 +85,24 @@ const CAUSE_ICONS: Record<string, React.ElementType> = {
   protest: AlertOctagon,
 };
 
-// Approximate centroids for known Bengaluru corridors (fallback = city centre)
-const CORRIDOR_CENTROIDS: Record<string, [number, number]> = {
-  "Mysore Road":      [12.9535, 77.5229],
-  "MG Road":          [12.9756, 77.6032],
-  "Outer Ring Road":  [12.9352, 77.6893],
-  "Hosur Road":       [12.9185, 77.6248],
-  "Tumkur Road":      [13.0281, 77.5367],
-  "Old Airport Road": [12.9762, 77.6408],
-  "Sarjapur Road":    [12.9062, 77.6800],
-  "Bellary Road":     [13.0358, 77.5970],
-};
+// Coordinates come from the real corridor_centroids table via GET /api/v1/corridors
+// (M17, mean lat/lon per corridor from the ASTraM CSV). The Bengaluru city centre
+// is used only when the operator's corridor can't be matched to a real centroid.
 const DEFAULT_COORDS: [number, number] = [12.9716, 77.5946]; // Bengaluru centroid
 
-function corridorCoords(corridor: string | null): [number, number] {
+export function resolveCorridorCoords(
+  corridor: string | null,
+  centroids: CorridorCentroid[],
+): [number, number] {
   if (!corridor) return DEFAULT_COORDS;
-  for (const [key, val] of Object.entries(CORRIDOR_CENTROIDS)) {
-    if (corridor.toLowerCase().includes(key.toLowerCase())) return val;
-  }
+  const q = corridor.trim().toLowerCase();
+  if (!q) return DEFAULT_COORDS;
+  const exact = centroids.find((c) => c.name.toLowerCase() === q);
+  if (exact) return [exact.lat, exact.lon];
+  const fuzzy = centroids.find(
+    (c) => c.name.toLowerCase().includes(q) || q.includes(c.name.toLowerCase()),
+  );
+  if (fuzzy) return [fuzzy.lat, fuzzy.lon];
   return DEFAULT_COORDS;
 }
 
@@ -497,11 +498,13 @@ function pkgToForm(pkg: PlannedEventPackage): EventFormState {
 function AddEditDialog({
   open,
   editPkg,
+  centroids,
   onClose,
   onSaved,
 }: {
   open: boolean;
   editPkg: PlannedEventPackage | null;
+  centroids: CorridorCentroid[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -526,16 +529,49 @@ function AddEditDialog({
   const set = (field: keyof EventFormState, value: string | boolean) =>
     setForm((f) => ({ ...f, [field]: value }));
 
-  const runPrediction = async () => {
+  const validateForm = (): string | null => {
     if (!form.cause || !form.startDate) {
-      setError("Cause and start date are required.");
+      return "Cause and start date are required.";
+    }
+
+    const now = new Date();
+    const startStr = `${form.startDate}T${form.startTime || "00:00"}`;
+    const startObj = new Date(startStr);
+
+    if (startObj < now) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const startDay = new Date(startObj);
+      startDay.setHours(0, 0, 0, 0);
+
+      if (startDay < today) {
+        return "Start date cannot be before the current date.";
+      }
+      return "Start time cannot be in the past.";
+    }
+
+    if (form.endDate) {
+      const endStr = `${form.endDate}T${form.endTime || "00:00"}`;
+      const endObj = new Date(endStr);
+      if (endObj <= startObj) {
+        return "End date and time must be after the start date and time.";
+      }
+    }
+
+    return null;
+  };
+
+  const runPrediction = async () => {
+    const err = validateForm();
+    if (err) {
+      setError(err);
       return;
     }
     setError(null);
     setSaving(true);
     setPrediction(null);
     try {
-      const [lat, lng] = corridorCoords(form.corridor || null);
+      const [lat, lng] = resolveCorridorCoords(form.corridor || null, centroids);
       const payload: import("@/lib/types").PlannedIngestPayload = {
         ...(editEventIdRef.current ? { event_id: editEventIdRef.current } : {}),
         event_cause: form.cause,
@@ -582,14 +618,15 @@ function AddEditDialog({
       return;
     }
     // No prediction yet — ingest directly
-    if (!form.cause || !form.startDate) {
-      setError("Cause and start date are required.");
+    const err = validateForm();
+    if (err) {
+      setError(err);
       return;
     }
     setError(null);
     setSaving(true);
     try {
-      const [lat, lng] = corridorCoords(form.corridor || null);
+      const [lat, lng] = resolveCorridorCoords(form.corridor || null, centroids);
       await api.ingestPlanned({
         ...(editEventIdRef.current ? { event_id: editEventIdRef.current } : {}),
         event_cause: form.cause,
@@ -611,6 +648,18 @@ function AddEditDialog({
   };
 
   const isLoading = saving || predicting;
+
+  const corridorQuery = form.corridor.trim();
+  const corridorMatched =
+    corridorQuery.length > 0 &&
+    centroids.some(
+      (c) =>
+        c.name.toLowerCase() === corridorQuery.toLowerCase() ||
+        c.name.toLowerCase().includes(corridorQuery.toLowerCase()) ||
+        corridorQuery.toLowerCase().includes(c.name.toLowerCase()),
+    );
+  const [hintLat, hintLng] = resolveCorridorCoords(corridorQuery || null, centroids);
+  const corridorCoordsHint = `${hintLat.toFixed(4)}, ${hintLng.toFixed(4)}`;
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -644,9 +693,22 @@ function AddEditDialog({
                 <Input
                   className="h-8 text-sm"
                   placeholder="e.g. Mysore Road"
+                  list="corridor-centroids"
                   value={form.corridor}
                   onChange={(e) => set("corridor", e.target.value)}
                 />
+                <datalist id="corridor-centroids">
+                  {centroids.map((c) => (
+                    <option key={c.name} value={c.name} />
+                  ))}
+                </datalist>
+                {corridorQuery.length > 0 && (
+                  <p className="text-[10px] text-muted-foreground">
+                    {corridorMatched
+                      ? `Using real centroid ${corridorCoordsHint}`
+                      : "No matching centroid — defaults to city centre"}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -764,13 +826,14 @@ function AddEditDialog({
 // Page
 // ---------------------------------------------------------------------------
 
-const HOUR_WINDOWS = [24, 48, 72] as const;
+const HOUR_WINDOWS = [24, 48, 72, 168] as const;
 type HourWindow = (typeof HOUR_WINDOWS)[number];
 
 export default function PlannedPage() {
   const { user } = useAuth();
   const canEdit = user ? can.addPlannedEvent(user.role) : false;
   const [packages, setPackages] = useState<PlannedEventPackage[]>([]);
+  const [centroids, setCentroids] = useState<CorridorCentroid[]>([]);
   const [loading, setLoading] = useState(true);
   const [hourWindow, setHourWindow] = useState<HourWindow>(72);
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
@@ -793,6 +856,14 @@ export default function PlannedPage() {
   }, []);
 
   useEffect(() => { load(hourWindow); }, [load, hourWindow]);
+
+  // Real corridor centroids (GET /api/v1/corridors) — drives ingest coordinates
+  // for planned events, replacing the old hardcoded lookup.
+  useEffect(() => {
+    api.corridors()
+      .then((res) => setCentroids(res.corridors))
+      .catch(() => setCentroids([]));
+  }, []);
 
   const filtered = packages.filter((p) => {
     if (filterCause !== "all" && p.cause !== filterCause) return false;
@@ -833,7 +904,7 @@ export default function PlannedPage() {
                 )}
                 onClick={() => setHourWindow(w)}
               >
-                {w}h
+                {w === 168 ? "7d" : `${w}h`}
               </button>
             ))}
           </div>
@@ -978,6 +1049,7 @@ export default function PlannedPage() {
         <AddEditDialog
           open={dialogOpen}
           editPkg={editPkg}
+          centroids={centroids}
           onClose={() => setDialogOpen(false)}
           onSaved={() => load(hourWindow)}
         />

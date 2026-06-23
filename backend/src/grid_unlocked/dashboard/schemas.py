@@ -11,6 +11,7 @@ class DeltaScope(StrEnum):
     HOTSPOT = "hotspot"
     CITIZEN = "citizen"
     FIELD = "field"
+    INCIDENT = "incident"
 
 
 class DashboardDelta(BaseModel):

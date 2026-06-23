@@ -23,7 +23,7 @@ async def diversion_atlas(
     junction_id: str,
     service: DiversionService = Depends(_service),
 ) -> AtlasEntry:
-    return service.get_atlas(junction_id)
+    return await service.get_atlas(junction_id)
 
 
 @router.get("/atlas", response_model=list[str])
@@ -36,7 +36,7 @@ async def diversion_compute(
     body: ComputeRequest,
     service: DiversionService = Depends(_service),
 ) -> AtlasEntry:
-    return service.compute(body)
+    return await service.compute(body)
 
 
 @router.get("/scenarios/{event_id}", response_model=ScenarioResponse)
