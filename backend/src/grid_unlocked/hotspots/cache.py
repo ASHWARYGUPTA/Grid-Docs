@@ -1,6 +1,4 @@
-import json
 import time
-from datetime import UTC, datetime
 
 from grid_unlocked.config import settings
 from grid_unlocked.hotspots.schemas import ObservedHotspotsResponse, PredictedHotspotsResponse

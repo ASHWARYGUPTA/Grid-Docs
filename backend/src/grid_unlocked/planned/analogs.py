@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import csv
-from datetime import UTC, datetime
+from datetime import datetime
 
 from grid_unlocked.config import settings
 from grid_unlocked.ingestion.validator import normalize_cause, parse_bool, parse_datetime

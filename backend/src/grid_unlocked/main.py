@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from grid_unlocked.config import settings
 from grid_unlocked.db.session import SessionLocal, get_session, init_db
 from grid_unlocked.execution.service import setup_command_queue
-from grid_unlocked.execution.queue import get_command_queue
 from grid_unlocked.features.router import router as features_router
 from grid_unlocked.features.service import FeatureService
 from grid_unlocked.features.subscriber import register_feature_subscribers

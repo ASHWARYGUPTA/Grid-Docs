@@ -1,4 +1,3 @@
-import json
 
 from grid_unlocked.features.constants import FEATURE_CACHE_TTL_SECONDS
 from grid_unlocked.propagation.schemas import PropagationMap

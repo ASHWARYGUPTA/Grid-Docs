@@ -11,7 +11,6 @@ from httpx import ASGITransport, AsyncClient
 from grid_unlocked.config import settings
 from grid_unlocked.diversions.atlas import JUNCTION_REGISTRY, get_atlas, list_atlas_junction_ids
 from grid_unlocked.diversions.graph import k_shortest_paths
-from grid_unlocked.diversions.gridlock import detect_gridlock
 from grid_unlocked.features.graph_stub import corridor_to_node_id
 from grid_unlocked.features.subscriber import register_feature_subscribers
 from grid_unlocked.hotspots.service import HotspotService

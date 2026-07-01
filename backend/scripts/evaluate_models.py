@@ -4,10 +4,8 @@
 from __future__ import annotations
 
 import argparse
-import math
 from datetime import UTC, datetime
 import numpy as np
-import pandas as pd
 import joblib
 from pathlib import Path
 from sklearn.model_selection import train_test_split
@@ -16,9 +14,9 @@ from lifelines.utils import concordance_index
 
 from grid_unlocked.config import settings
 from grid_unlocked.impact.feature_matrix import FEATURE_COLUMNS
-from grid_unlocked.impact.rci import compute_rci, ict_bands_from_median
+from grid_unlocked.impact.rci import compute_rci
 from grid_unlocked.features.schemas import FeatureVector
-from grid_unlocked.learning.training_core import IST, apply_encoders, load_csv_frame as load_training_frame
+from grid_unlocked.learning.training_core import apply_encoders, load_csv_frame as load_training_frame
 
 def expected_calibration_error(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -> float:
     bin_boundaries = np.linspace(0, 1, n_bins + 1)
@@ -103,8 +101,7 @@ def main() -> None:
     
     # Compute P80 quantile (S(t) = 0.20) for each test record
     p80_times = []
-    c_index_scores = []
-    
+
     for i, col in enumerate(surv_fn.columns):
         probs = surv_fn[col].values
         

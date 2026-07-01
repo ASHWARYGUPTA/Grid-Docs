@@ -164,7 +164,7 @@ interface MapPanelProps {
 export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank, activeDashboardTab, selectedPredictedCorridor }: MapPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapplsMap | null>(null);
-  const containerIdRef = useRef(`mappls-live-map-${++mapContainerSeq}`);
+  const [containerId] = useState(() => `mappls-live-map-${++mapContainerSeq}`);
   // next/script dedupes by `src` and only fires `onReady` once globally, so
   // navigating away from /live and back mounts a fresh MapPanel against an
   // already-loaded script — the onReady callback below never fires again,
@@ -181,7 +181,9 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank, ac
   // actually changed instead of tearing down and rebuilding every pin.
   const incidentMarkersRef = useRef<Map<string, MapplsMarker>>(new Map());
   const onSelectEventRef = useRef(onSelectEvent);
-  onSelectEventRef.current = onSelectEvent;
+  useEffect(() => {
+    onSelectEventRef.current = onSelectEvent;
+  }, [onSelectEvent]);
   // Guards overlapping refreshIncidents() calls the same way
   // refreshGenerationRef guards refreshObserved() below.
   const incidentGenerationRef = useRef(0);
@@ -225,7 +227,7 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank, ac
     // Mappls's Map constructor only initializes correctly given a container
     // *id string* — passing the element directly silently returns a
     // near-empty, non-functional instance with no map-specific methods.
-    const map = new window.mappls.Map(containerIdRef.current, {
+    const map = new window.mappls.Map(containerId, {
       center: BENGALURU_CENTER,
       zoom: 11,
     });
@@ -254,11 +256,11 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank, ac
       // synchronously inside this function. Abandoning the instance instead
       // (disconnect our own listeners/observers, null our ref, let GC
       // reclaim it) avoids the crash. Each mount uses a unique container id
-      // (see containerIdRef above), so an abandoned instance can never
+      // (see containerId above), so an abandoned instance can never
       // collide with the next mount's map.
       mapRef.current = null;
     };
-  }, [sdkReady]);
+  }, [sdkReady, containerId]);
 
   function refreshObserved(map: MapplsMap) {
     // The heatmap intensity field is the rich, full-history per-cell
@@ -732,7 +734,7 @@ export function MapPanel({ selectedCard, onSelectEvent, highlightedRouteRank, ac
         onReady={() => setSdkReady(true)}
         onError={() => setSdkLoadFailed(true)}
       />
-      <div ref={containerRef} id={containerIdRef.current} className="h-full w-full" />
+      <div ref={containerRef} id={containerId} className="h-full w-full" />
       <div className="absolute top-2 left-2 flex gap-1 bg-background/90 rounded-md p-1 border">
         <Button
           size="sm"

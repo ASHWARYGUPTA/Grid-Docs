@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import math
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -39,11 +38,9 @@ from grid_unlocked.config import settings
 from grid_unlocked.db.models import NormalizedEventRow
 from grid_unlocked.db import session as _session_module
 from grid_unlocked.governance.service import GovernanceService
-from grid_unlocked.impact.feature_matrix import FEATURE_COLUMNS
 from grid_unlocked.impact.registry import registry
 from grid_unlocked.learning import service as learning_service_module
 from grid_unlocked.learning.buffer import BufferResult
-from grid_unlocked.learning.schemas import RetrainTrigger
 from grid_unlocked.main import app
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -113,7 +110,6 @@ async def test_manifest_80_20_tolerance(client):
     async with _session_module.SessionLocal() as session:
         await _seed_recent_pool(session, n=20)
 
-    monkeypatch_window = 4
     resp = await client.post("/learning/retrain", json={"trigger": "manual"})
     assert resp.status_code == 200
     job_id = resp.json()["job_id"]

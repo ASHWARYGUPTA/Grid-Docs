@@ -82,7 +82,6 @@ class PropagationService:
     async def get_active(self) -> list[PropagationMap]:
         active = await propagation_cache.list_active()
         if not active:
-            from grid_unlocked.recommendations.repository import RecommendationRepository
             from grid_unlocked.db.models import NormalizedEventRow
             from sqlalchemy import select
             

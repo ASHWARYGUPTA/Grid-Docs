@@ -28,12 +28,10 @@ from grid_unlocked.execution.queue import (
 )
 from grid_unlocked.execution.repository import ExecutionRepository
 from grid_unlocked.execution.schemas import (
-    AuditEntry,
     AuditQueryResponse,
     CommandType,
     ExecuteDispatchRequest,
     ExecutionEnqueueResponse,
-    ExecutionRecord,
     ExecutionStatus,
     ExecutionStatusResponse,
     RetryResponse,

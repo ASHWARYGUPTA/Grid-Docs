@@ -311,8 +311,8 @@ function HealthPanel() {
         <div className="flex items-start gap-2 text-xs rounded-md border border-warn/30 bg-warn/8 px-3 py-2.5 text-warn">
           <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
           <span>
-            <strong>AI Impact Engine</strong> shows "down" because its ML models are not loaded. The system is still functional —
-            it's running rule-based fallback scoring (Tier 2 behavior). This is not a critical failure.
+            <strong>AI Impact Engine</strong> shows &quot;down&quot; because its ML models are not loaded. The system is still functional —
+            it&apos;s running rule-based fallback scoring (Tier 2 behavior). This is not a critical failure.
           </span>
         </div>
       )}

@@ -1,8 +1,7 @@
 import json
 import math
-from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from grid_unlocked.db.models import (
@@ -19,7 +18,6 @@ from grid_unlocked.features.constants import (
     VEH_COMPLEXITY_BASE,
 )
 from grid_unlocked.features.schemas import CorridorCausePrior, FeatureVector
-from grid_unlocked.ingestion.repository import row_to_schema
 
 
 class FeatureRepository:

@@ -47,7 +47,6 @@ def get_centrality(node_id: str) -> GraphCentrality:
 
 
 def get_neighbors(node_id: str, hops: int = 3) -> GraphNeighbors:
-    corridor = parse_node_id(node_id)
     visited: set[str] = {node_id}
     frontier = [node_id]
     collected: list[GraphCentrality] = []

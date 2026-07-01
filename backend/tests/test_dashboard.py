@@ -4,7 +4,6 @@ import time
 
 from starlette.testclient import TestClient
 
-from grid_unlocked.config import settings
 from grid_unlocked.dashboard.incident_subscriber import register_incident_subscribers
 from grid_unlocked.features.subscriber import register_feature_subscribers
 from grid_unlocked.governance.service import reset_cache_for_tests
@@ -112,7 +111,7 @@ def test_multiple_connections_all_receive_same_delta():
 def test_disconnect_reconnect_does_not_crash_server():
     client = _setup_client()
     with client:
-        with client.websocket_connect("/ws/dashboard") as ws:
+        with client.websocket_connect("/ws/dashboard"):
             pass  # closes immediately on exiting the with-block
 
         # Server should still be healthy and a new connection should work.
@@ -135,7 +134,7 @@ def test_card_delta_arrives_within_5s_of_ingest():
                 f"/recommendations/{card['card_id']}/approve",
                 json={"commander_id": "CMD-001", "override_codes": []},
             )
-            message = _receive_until_scope(ws, "card")  # card delta, fired on approve
+            _receive_until_scope(ws, "card")  # card delta, fired on approve
             elapsed = time.perf_counter() - t0
             assert elapsed < 5.0
 

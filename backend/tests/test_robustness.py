@@ -77,7 +77,7 @@ async def test_m01_upsert_does_not_break_downstream(wired_client):
     eid = "FKIDROB003"
     await _ingest_and_wait(wired_client, eid)
 
-    score1 = (await wired_client.post("/impact/score", json={"event_id": eid})).json()["rci"]
+    await wired_client.post("/impact/score", json={"event_id": eid})
 
     updated = {
         **BASE_EVENT,

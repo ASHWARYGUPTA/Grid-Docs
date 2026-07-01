@@ -469,7 +469,7 @@ async def test_m09_approve_planned_event_enqueues_barricade_via_m10(monkeypatch,
 
     await asyncio.sleep(0.6)
 
-    audit = await wired_client.get(f"/execute/audit?event_id=FKIDE2EPLAN1")
+    audit = await wired_client.get("/execute/audit?event_id=FKIDE2EPLAN1")
     assert audit.status_code == 200
     entries = audit.json()["entries"]
     command_types = {e["command_type"] for e in entries}

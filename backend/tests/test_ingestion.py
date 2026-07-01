@@ -1,7 +1,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from grid_unlocked.db.session import SessionLocal, init_db
+from grid_unlocked.db.session import init_db
 from grid_unlocked.main import app
 
 

@@ -6,7 +6,6 @@ from dateutil import parser as date_parser
 from grid_unlocked.config import settings
 from grid_unlocked.ingestion.vocab import (
     CAUSE_ALIASES,
-    DROPPED_CAUSES,
     VALID_CORRIDORS,
     VALID_EVENT_TYPES,
     VALID_STATUSES,

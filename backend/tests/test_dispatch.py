@@ -9,7 +9,7 @@ from grid_unlocked.config import settings
 from grid_unlocked.dispatch.greedy import greedy_assign
 from grid_unlocked.dispatch.incidents import IncidentContext
 from grid_unlocked.dispatch.roster import resolve_units
-from grid_unlocked.dispatch.schemas import EquipType, GovernanceTier, UnitOverride
+from grid_unlocked.dispatch.schemas import EquipType, UnitOverride
 from grid_unlocked.features.subscriber import register_feature_subscribers
 from grid_unlocked.main import app
 from grid_unlocked.propagation.subscriber import register_propagation_subscribers

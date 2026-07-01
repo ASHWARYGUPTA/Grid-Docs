@@ -9,7 +9,7 @@ from sklearn.cluster import DBSCAN
 from grid_unlocked.features.subscriber import register_feature_subscribers
 from grid_unlocked.hotspots.cusum import CusumTracker
 from grid_unlocked.hotspots.dbscan import EventPoint, cause_entropy, cluster_events_haversine
-from grid_unlocked.hotspots.geo import count_within_km, haversine_km, h3_centroid, h3_res7
+from grid_unlocked.hotspots.geo import haversine_km, h3_centroid
 from grid_unlocked.hotspots.historical import historical_index
 from grid_unlocked.hotspots.service import HotspotService
 from grid_unlocked.hotspots.subscriber import register_hotspot_subscribers

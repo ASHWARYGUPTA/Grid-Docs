@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from grid_unlocked.config import settings
 from grid_unlocked.dashboard.bus import dashboard_bus
 from grid_unlocked.dashboard.schemas import DashboardDelta, DeltaScope
 from grid_unlocked.dispatch.schemas import GovernanceTier, RecommendRequest

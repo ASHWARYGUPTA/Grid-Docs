@@ -1,7 +1,6 @@
 """M17 CitizenReportService tests."""
 
 import io
-import json
 
 import pytest
 from httpx import ASGITransport, AsyncClient

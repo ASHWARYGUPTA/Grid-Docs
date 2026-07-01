@@ -1,9 +1,8 @@
-import json
 from datetime import UTC, datetime
 
 import h3
 
-from grid_unlocked.features.constants import FEATURE_CACHE_TTL_SECONDS, NAMED_CORRIDORS
+from grid_unlocked.features.constants import NAMED_CORRIDORS
 from grid_unlocked.features.graph_stub import corridor_centrality, corridor_to_node_id
 from grid_unlocked.features.repository import FeatureRepository, veh_complexity_score
 from grid_unlocked.features.schemas import FeatureVector

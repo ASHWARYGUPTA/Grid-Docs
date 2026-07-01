@@ -5,7 +5,6 @@ import asyncio
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from grid_unlocked.config import settings
 from grid_unlocked.diversions.atlas import JUNCTION_REGISTRY, get_atlas, routes_for_corridor
 from grid_unlocked.diversions.gridlock import detect_gridlock
 from grid_unlocked.features.subscriber import register_feature_subscribers

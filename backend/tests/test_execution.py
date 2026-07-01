@@ -16,8 +16,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from grid_unlocked.config import settings
-from grid_unlocked.execution.queue import CommandQueue, QueuedCommand, set_command_queue
-from grid_unlocked.execution.schemas import CommandType, ExecutionStatus
+from grid_unlocked.execution.queue import CommandQueue
+from grid_unlocked.execution.schemas import ExecutionStatus
 from grid_unlocked.execution.service import setup_command_queue
 from grid_unlocked.execution.station_client import MockStationClient, StationResponse
 from grid_unlocked.features.subscriber import register_feature_subscribers

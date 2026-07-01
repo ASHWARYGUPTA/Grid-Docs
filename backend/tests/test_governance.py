@@ -20,7 +20,6 @@ from httpx import ASGITransport, AsyncClient
 from grid_unlocked.config import settings
 from grid_unlocked.db import session as _session_module
 from grid_unlocked.features.subscriber import register_feature_subscribers
-from grid_unlocked.governance.schemas import DrillRequest
 from grid_unlocked.governance.service import GovernanceService, read_cached_state
 from grid_unlocked.impact.registry import registry
 from grid_unlocked.main import app
